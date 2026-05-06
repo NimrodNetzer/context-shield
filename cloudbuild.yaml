@@ -1,0 +1,32 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/contextshield-backend:$COMMIT_SHA'
+      - './backend'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/contextshield-backend:$COMMIT_SHA'
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'contextshield-backend'
+      - '--image=gcr.io/$PROJECT_ID/contextshield-backend:$COMMIT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated'
+      - '--set-secrets=GROQ_API_KEY=groq-api-key:latest,ALLOWED_SA_EMAILS=allowed-sa-emails:latest'
+      - '--set-env-vars=SERVICE_URL=https://contextshield-backend-HASH-uc.a.run.app'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--max-instances=10'
+      - '--timeout=30'
+
+images:
+  - 'gcr.io/$PROJECT_ID/contextshield-backend:$COMMIT_SHA'
