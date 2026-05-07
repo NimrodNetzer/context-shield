@@ -1,25 +1,22 @@
 /**
  * Code.gs — Main entry point for the ContextShield Gmail Add-on.
  *
- * Triggered automatically when the user opens a Gmail message.
- * Extracts a minimal, safe payload from the message and sends it to the
- * backend for analysis.
- *
- * Security boundaries enforced here:
+ * Security boundaries:
  *  - Only plain text body extracted (no HTML, no raw MIME)
- *  - Attachment NAMES only — content never sent
+ *  - Attachment names only — content never sent
  *  - Body truncated client-side to 8000 chars before transmission
- *  - Scope requested: gmail.readonly only (cannot send, delete, or modify)
+ *  - Scope: gmail.readonly only
  */
 
 var BODY_MAX_CHARS = 8000;
 var ATTACHMENT_MAX_COUNT = 20;
+var CHAT_HISTORY_KEY = 'contextshield_chat_history';
+var EMAIL_CONTEXT_KEY = 'contextshield_email_context';
 
-/**
- * Contextual trigger — called each time the user opens a message.
- * @param {Object} e - Gmail add-on event object.
- * @returns {Card} The rendered result card.
- */
+// ---------------------------------------------------------------------------
+// Contextual trigger
+// ---------------------------------------------------------------------------
+
 function onGmailMessage(e) {
   var messageId = e.gmail.messageId;
   var accessToken = e.gmail.accessToken;
@@ -35,10 +32,10 @@ function onGmailMessage(e) {
     var result = callAnalyzeEndpoint(payload);
     saveToHistory(messageId, sender, subject, result.verdict, result.score);
 
-    // Store context for chat follow-up questions
+    // Store context for chat — only snippet, never full body
     var bodySnippet = (payload.body_plain || '').substring(0, 500);
     PropertiesService.getUserProperties().setProperty(
-      'contextshield_email_context',
+      EMAIL_CONTEXT_KEY,
       JSON.stringify({
         sender: sender,
         subject: subject,
@@ -55,26 +52,31 @@ function onGmailMessage(e) {
   }
 }
 
-/**
- * Chat action — user submits a question about the current email.
- * Called by the text input submit button in the card.
- */
+// ---------------------------------------------------------------------------
+// Chat
+// ---------------------------------------------------------------------------
+
 function onChatSubmit(e) {
-  var question = e.formInput ? e.formInput.chat_question : '';
-  if (!question || !question.trim()) {
+  var question = (e.formInput && e.formInput.chat_question) ? e.formInput.chat_question.trim() : '';
+  if (!question) {
     return CardService.newActionResponseBuilder()
       .setNotification(CardService.newNotification().setText('Please enter a question.'))
       .build();
   }
 
   var props = PropertiesService.getUserProperties();
-  var contextRaw = props.getProperty('contextshield_email_context');
-  var ctx = contextRaw ? JSON.parse(contextRaw) : {};
+  var ctx = {};
+  try { ctx = JSON.parse(props.getProperty(EMAIL_CONTEXT_KEY) || '{}'); } catch(e) {}
 
+  // Load existing conversation
+  var conversation = [];
+  try { conversation = JSON.parse(props.getProperty(CHAT_HISTORY_KEY) || '[]'); } catch(e) {}
+
+  // Get answer from backend
   var answer;
   try {
     answer = callChatEndpoint({
-      question: question.trim(),
+      question: question,
       sender: ctx.sender || '',
       subject: ctx.subject || '',
       body_snippet: ctx.bodySnippet || '',
@@ -83,19 +85,40 @@ function onChatSubmit(e) {
       signals: ctx.signals || [],
     });
   } catch (err) {
-    answer = 'Could not reach the assistant. Please try again.';
+    answer = 'Could not reach the assistant: ' + err.message;
   }
+
+  // Append to persistent conversation
+  conversation.push({ role: 'user', content: question });
+  conversation.push({ role: 'assistant', content: answer });
+
+  // Keep last 20 messages (10 exchanges)
+  if (conversation.length > 20) {
+    conversation = conversation.slice(conversation.length - 20);
+  }
+
+  props.setProperty(CHAT_HISTORY_KEY, JSON.stringify(conversation));
 
   return CardService.newActionResponseBuilder()
     .setNavigation(
-      CardService.newNavigation().pushCard(buildChatAnswerCard(question, answer))
+      CardService.newNavigation().updateCard(buildChatCard(conversation))
     )
     .build();
 }
 
-/**
- * History item click — shows detail card for a past analysis.
- */
+function onClearChat(e) {
+  PropertiesService.getUserProperties().deleteProperty(CHAT_HISTORY_KEY);
+  return CardService.newActionResponseBuilder()
+    .setNavigation(
+      CardService.newNavigation().updateCard(buildChatCard([]))
+    )
+    .build();
+}
+
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+
 function onHistoryItemClick(e) {
   var p = e.parameters;
   return CardService.newActionResponseBuilder()
@@ -107,44 +130,10 @@ function onHistoryItemClick(e) {
     .build();
 }
 
-/**
- * Feedback action — user marks email as Safe.
- */
-function onMarkSafe(e) {
-  var params = e.parameters;
-  submitFeedback(params.messageId, params.originalVerdict, 'SAFE');
-  return buildFeedbackConfirmCard('SAFE');
-}
+// ---------------------------------------------------------------------------
+// Payload builder
+// ---------------------------------------------------------------------------
 
-/**
- * Feedback action — user marks email as a Threat.
- */
-function onMarkThreat(e) {
-  var params = e.parameters;
-  submitFeedback(params.messageId, params.originalVerdict, 'MALICIOUS');
-  return buildFeedbackConfirmCard('MALICIOUS');
-}
-
-/**
- * Sends feedback to the backend.
- */
-function submitFeedback(messageId, originalVerdict, userVerdict) {
-  try {
-    callFeedbackEndpoint({
-      message_id: messageId,
-      original_verdict: originalVerdict,
-      user_verdict: userVerdict,
-    });
-  } catch (err) {
-    // Feedback failure is non-critical — log and continue
-    Logger.log('Feedback submission failed: ' + err.message);
-  }
-}
-
-/**
- * Builds a safe, bounded payload from a GmailMessage object.
- * Never includes attachment content.
- */
 function buildPayload(message, messageId, sender, subject) {
   var rawHeaders = parseAuthHeaders(message);
   var attachmentNames = getAttachmentNames(message);
@@ -165,39 +154,23 @@ function buildPayload(message, messageId, sender, subject) {
   };
 }
 
-/**
- * Extracts SPF/DKIM/DMARC verdicts from raw message headers.
- */
 function parseAuthHeaders(message) {
   var headers = { spf: null, dkim: null, dmarc: null };
-
   try {
-    var authResults = message.getHeader
-      ? message.getHeader('Authentication-Results') || ''
-      : '';
-
+    var authResults = message.getHeader ? message.getHeader('Authentication-Results') || '' : '';
     var spfMatch = authResults.match(/spf=(pass|fail|softfail|neutral|none)/i);
     if (spfMatch) headers.spf = spfMatch[1].toLowerCase();
-
     var dkimMatch = authResults.match(/dkim=(pass|fail|none)/i);
     if (dkimMatch) headers.dkim = dkimMatch[1].toLowerCase();
-
     var dmarcMatch = authResults.match(/dmarc=(pass|fail|none)/i);
     if (dmarcMatch) headers.dmarc = dmarcMatch[1].toLowerCase();
-  } catch (e) {
-    // Header access failed — backend will analyze with nulls
-  }
-
+  } catch (e) {}
   return headers;
 }
 
-/**
- * Returns attachment names (not content) — bounded to ATTACHMENT_MAX_COUNT.
- */
 function getAttachmentNames(message) {
   try {
-    var attachments = message.getAttachments();
-    return attachments
+    return message.getAttachments()
       .slice(0, ATTACHMENT_MAX_COUNT)
       .map(function(a) { return a.getName(); });
   } catch (e) {
