@@ -138,8 +138,11 @@ def _check_display_name_spoofing(sender: str, signals: list[Signal]) -> int:
     domain = _extract_domain(sender) or ""
     name_normalized = _normalize_homoglyphs(display_name)
     domain_normalized = _normalize_homoglyphs(domain)
+    domain_parts = domain_normalized.split(".")
+    registered_domain = ".".join(domain_parts[-2:]) if len(domain_parts) >= 2 else domain_normalized
     for brand in KNOWN_BRANDS:
-        if brand in name_normalized and brand not in domain_normalized:
+        brand_norm = _normalize_homoglyphs(brand.replace(" ", ""))
+        if brand_norm in name_normalized and brand_norm not in registered_domain:
             signals.append(Signal(
                 type="display_name_spoofing",
                 severity=Severity.CRITICAL,
@@ -152,15 +155,22 @@ def _check_display_name_spoofing(sender: str, signals: list[Signal]) -> int:
 def _check_homoglyph_domain(sender: str, signals: list[Signal]) -> int:
     domain = _extract_domain(sender) or ""
     domain_norm = _normalize_homoglyphs(domain)
+    parts = domain_norm.split(".")
+    # Registered domain = last two parts (e.g. "google.com")
+    registered = ".".join(parts[-2:]) if len(parts) >= 2 else domain_norm
     for brand in KNOWN_BRANDS:
         brand_norm = _normalize_homoglyphs(brand.replace(" ", ""))
-        if brand_norm in domain_norm and brand_norm != domain_norm.split(".")[0]:
-            signals.append(Signal(
-                type="homoglyph_domain",
-                severity=Severity.CRITICAL,
-                value=domain,
-            ))
-            return 75
+        if brand_norm not in domain_norm:
+            continue
+        # Skip if brand legitimately owns the registered domain
+        if brand_norm in registered:
+            continue
+        signals.append(Signal(
+            type="homoglyph_domain",
+            severity=Severity.CRITICAL,
+            value=domain,
+        ))
+        return 75
     return 0
 
 
