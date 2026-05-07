@@ -125,6 +125,23 @@ function buildResultCard(result, messageId, sender, subject) {
     card.addSection(signalSection);
   }
 
+  // -- Chat --
+  var chatSection = CardService.newCardSection().setHeader('Ask the assistant');
+
+  var chatInput = CardService.newTextInput()
+    .setFieldName('chat_question')
+    .setHint('e.g. Is this link safe? Why is the sender suspicious?')
+    .setMultiline(false);
+
+  var chatAction = CardService.newAction().setFunctionName('onChatSubmit');
+  var chatButton = CardService.newTextButton()
+    .setText('Ask')
+    .setOnClickAction(chatAction);
+
+  chatSection.addWidget(chatInput);
+  chatSection.addWidget(CardService.newButtonSet().addButton(chatButton));
+  card.addSection(chatSection);
+
   // -- Feedback --
   var feedbackSection = CardService.newCardSection().setHeader('Was this correct?');
 
@@ -164,29 +181,77 @@ function buildResultCard(result, messageId, sender, subject) {
   );
   card.addSection(actionSection);
 
-  // -- History --
+  // -- History — compact chips, click to expand --
   var history = getHistory();
   if (history.length > 0) {
     var historySection = CardService.newCardSection()
-      .setHeader('Recent (' + history.length + ')')
+      .setHeader('Recent')
       .setCollapsible(true)
       .setNumUncollapsibleWidgets(0);
 
     history.forEach(function(item) {
-      var label = item.verdict + ' · ' + item.score + '/100';
-      var text = (item.subject || '(no subject)').substring(0, 50);
+      var chip = item.verdict + '  ' + item.score + '/100  · ' + (item.subject || '(no subject)').substring(0, 35);
+      var expandAction = CardService.newAction()
+        .setFunctionName('onHistoryItemClick')
+        .setParameters({
+          sender: item.sender,
+          subject: item.subject || '',
+          verdict: item.verdict,
+          score: String(item.score),
+          analyzedAt: item.analyzedAt || '',
+        });
+
       historySection.addWidget(
-        CardService.newDecoratedText()
-          .setTopLabel(label)
-          .setText(text)
-          .setBottomLabel(item.sender.substring(0, 40))
-          .setWrapText(false)
+        CardService.newTextButton()
+          .setText(chip)
+          .setOnClickAction(expandAction)
       );
     });
 
     card.addSection(historySection);
   }
 
+  return card.build();
+}
+
+/**
+ * Chat answer card — pushed on top of the result card.
+ */
+function buildChatAnswerCard(question, answer) {
+  var card = CardService.newCardBuilder()
+    .setName('contextshield_chat')
+    .setHeader(
+      CardService.newCardHeader()
+        .setTitle('ContextShield Assistant')
+        .setSubtitle('Security Q&A')
+    );
+
+  var section = CardService.newCardSection();
+
+  section.addWidget(
+    CardService.newDecoratedText()
+      .setTopLabel('Your question')
+      .setText(question)
+      .setWrapText(true)
+  );
+
+  section.addWidget(
+    CardService.newDecoratedText()
+      .setTopLabel('Answer')
+      .setText(answer)
+      .setWrapText(true)
+  );
+
+  var backAction = CardService.newAction().setFunctionName('onGmailMessage');
+  section.addWidget(
+    CardService.newButtonSet().addButton(
+      CardService.newTextButton()
+        .setText('← Back')
+        .setOnClickAction(backAction)
+    )
+  );
+
+  card.addSection(section);
   return card.build();
 }
 
@@ -208,6 +273,56 @@ function buildFeedbackConfirmCard(userVerdict) {
       .setText('Marked as: ' + userVerdict + '. Thank you for the correction.')
       .setWrapText(true)
   );
+  card.addSection(section);
+  return card.build();
+}
+
+/**
+ * History item detail card — shown when user clicks a history chip.
+ */
+function buildHistoryDetailCard(sender, subject, verdict, score, analyzedAt) {
+  var card = CardService.newCardBuilder()
+    .setName('contextshield_history_detail')
+    .setHeader(
+      CardService.newCardHeader()
+        .setTitle(verdict + '  ' + score + '/100')
+        .setSubtitle('Previous analysis')
+    );
+
+  var section = CardService.newCardSection();
+
+  section.addWidget(
+    CardService.newDecoratedText()
+      .setTopLabel('Subject')
+      .setText(subject || '(no subject)')
+      .setWrapText(true)
+  );
+
+  section.addWidget(
+    CardService.newDecoratedText()
+      .setTopLabel('From')
+      .setText(sender || 'Unknown')
+      .setWrapText(true)
+  );
+
+  if (analyzedAt) {
+    section.addWidget(
+      CardService.newDecoratedText()
+        .setTopLabel('Analyzed at')
+        .setText(new Date(analyzedAt).toLocaleString())
+        .setWrapText(false)
+    );
+  }
+
+  var backAction = CardService.newAction().setFunctionName('onGmailMessage');
+  section.addWidget(
+    CardService.newButtonSet().addButton(
+      CardService.newTextButton()
+        .setText('← Back')
+        .setOnClickAction(backAction)
+    )
+  );
+
   card.addSection(section);
   return card.build();
 }

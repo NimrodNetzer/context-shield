@@ -1,8 +1,9 @@
 """
 ContextShield — FastAPI backend entry point.
 
-Exposes three endpoints:
+Exposes four endpoints:
   POST /analyze   — authenticated, rate-limited email analysis
+  POST /chat      — authenticated, follow-up questions about an email
   POST /feedback  — authenticated, user verdict correction logging
   GET  /health    — unauthenticated liveness probe for Cloud Run
 
@@ -22,6 +23,7 @@ from fastapi.responses import JSONResponse
 
 from analyzer import analyze
 from auth import verify_oidc_token
+from chat import answer_question
 from feedback import log_feedback
 from models import AnalyzeRequest, AnalyzeResponse
 from pydantic import BaseModel, Field
@@ -128,6 +130,47 @@ async def analyze_email(
     )
 
     return result
+
+
+class ChatRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    question: str = Field(..., min_length=1, max_length=500)
+    sender: str = Field(default="", max_length=320)
+    subject: str = Field(default="", max_length=998)
+    body_snippet: str = Field(default="", max_length=1000)
+    verdict: str = Field(default="UNKNOWN", max_length=20)
+    score: int = Field(default=0, ge=0, le=100)
+    signals: list[dict] = Field(default_factory=list, max_length=20)
+
+
+class ChatResponse(BaseModel):
+    answer: str
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat_about_email(
+    request: ChatRequest,
+    _auth: str = Depends(verify_oidc_token),
+):
+    """
+    Answers a follow-up question about a specific email in plain language.
+    The email context and analysis result are passed by the add-on.
+    """
+    try:
+        answer = answer_question(
+            question=request.question,
+            sender=request.sender,
+            subject=request.subject,
+            body_snippet=request.body_snippet,
+            verdict=request.verdict,
+            score=request.score,
+            signals=request.signals,
+        )
+    except Exception:
+        logger.exception("Chat failed")
+        raise HTTPException(status_code=500, detail="Chat unavailable")
+
+    return ChatResponse(answer=answer)
 
 
 class FeedbackRequest(BaseModel):

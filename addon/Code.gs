@@ -34,10 +34,77 @@ function onGmailMessage(e) {
   try {
     var result = callAnalyzeEndpoint(payload);
     saveToHistory(messageId, sender, subject, result.verdict, result.score);
+
+    // Store context for chat follow-up questions
+    var bodySnippet = (payload.body_plain || '').substring(0, 500);
+    PropertiesService.getUserProperties().setProperty(
+      'contextshield_email_context',
+      JSON.stringify({
+        sender: sender,
+        subject: subject,
+        bodySnippet: bodySnippet,
+        verdict: result.verdict,
+        score: result.score,
+        signals: result.signals || [],
+      })
+    );
+
     return buildResultCard(result, messageId, sender, subject);
   } catch (err) {
     return buildErrorCard(err.message);
   }
+}
+
+/**
+ * Chat action — user submits a question about the current email.
+ * Called by the text input submit button in the card.
+ */
+function onChatSubmit(e) {
+  var question = e.formInput ? e.formInput.chat_question : '';
+  if (!question || !question.trim()) {
+    return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText('Please enter a question.'))
+      .build();
+  }
+
+  var props = PropertiesService.getUserProperties();
+  var contextRaw = props.getProperty('contextshield_email_context');
+  var ctx = contextRaw ? JSON.parse(contextRaw) : {};
+
+  var answer;
+  try {
+    answer = callChatEndpoint({
+      question: question.trim(),
+      sender: ctx.sender || '',
+      subject: ctx.subject || '',
+      body_snippet: ctx.bodySnippet || '',
+      verdict: ctx.verdict || 'UNKNOWN',
+      score: ctx.score || 0,
+      signals: ctx.signals || [],
+    });
+  } catch (err) {
+    answer = 'Could not reach the assistant. Please try again.';
+  }
+
+  return CardService.newActionResponseBuilder()
+    .setNavigation(
+      CardService.newNavigation().pushCard(buildChatAnswerCard(question, answer))
+    )
+    .build();
+}
+
+/**
+ * History item click — shows detail card for a past analysis.
+ */
+function onHistoryItemClick(e) {
+  var p = e.parameters;
+  return CardService.newActionResponseBuilder()
+    .setNavigation(
+      CardService.newNavigation().pushCard(
+        buildHistoryDetailCard(p.sender, p.subject, p.verdict, parseInt(p.score), p.analyzedAt)
+      )
+    )
+    .build();
 }
 
 /**
