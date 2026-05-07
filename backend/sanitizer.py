@@ -22,15 +22,28 @@ SUBJECT_MAX_CHARS = 200
 SENDER_MAX_CHARS = 320
 
 
+_SKIP_TAGS = {"script", "style", "head", "noscript"}
+
+
 class _HTMLStripper(HTMLParser):
-    """Extract plain text from HTML without any external dependency."""
+    """Extract plain text from HTML, skipping script/style content."""
 
     def __init__(self) -> None:
         super().__init__()
         self._parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag.lower() in _SKIP_TAGS:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in _SKIP_TAGS and self._skip_depth > 0:
+            self._skip_depth -= 1
 
     def handle_data(self, data: str) -> None:
-        self._parts.append(data)
+        if self._skip_depth == 0:
+            self._parts.append(data)
 
     def get_text(self) -> str:
         return " ".join(self._parts)
