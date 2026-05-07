@@ -10,6 +10,11 @@
  */
 
 var SCORE_BAR_LENGTH = 10;
+var LTR = '‎'; // Left-to-Right Mark — forces LTR rendering in RTL UI
+
+function ltr(text) {
+  return LTR + (text || '');
+}
 
 function buildScoreBar(score) {
   var filled = Math.round(score / 10);
@@ -41,13 +46,13 @@ function buildResultCard(result, messageId, sender, subject) {
   var scoreSection = CardService.newCardSection();
   scoreSection.addWidget(
     CardService.newDecoratedText()
-      .setTopLabel('Verdict')
-      .setText(verdict)
+      .setTopLabel(ltr('Verdict'))
+      .setText(ltr(verdict))
   );
   scoreSection.addWidget(
     CardService.newDecoratedText()
-      .setTopLabel('Risk Score')
-      .setText(buildScoreBar(score))
+      .setTopLabel(ltr('Risk Score'))
+      .setText(ltr(buildScoreBar(score)))
   );
   card.addSection(scoreSection);
 
@@ -56,7 +61,7 @@ function buildResultCard(result, messageId, sender, subject) {
     var reasonSection = CardService.newCardSection().setHeader('Why');
     reasoning.forEach(function(line) {
       reasonSection.addWidget(
-        CardService.newDecoratedText().setText('• ' + line).setWrapText(true)
+        CardService.newDecoratedText().setText(ltr('• ' + line)).setWrapText(true)
       );
     });
     card.addSection(reasonSection);
@@ -69,7 +74,7 @@ function buildResultCard(result, messageId, sender, subject) {
 
     signals.forEach(function(signal) {
       var label = signal.type.replace(/_/g, ' ').toUpperCase();
-      var chip = '[' + signal.severity.toUpperCase() + ']  ' + label;
+      var chip = ltr('[' + signal.severity.toUpperCase() + ']  ' + label);
 
       signalSection.addWidget(
         CardService.newTextButton()
@@ -140,7 +145,7 @@ function buildResultCard(result, messageId, sender, subject) {
 // Chat card — full-page conversation
 // ---------------------------------------------------------------------------
 
-function buildChatCard(conversation) {
+function buildChatCard(conversation, messageId) {
   var card = CardService.newCardBuilder()
     .setName('contextshield_chat')
     .setHeader(
@@ -162,11 +167,11 @@ function buildChatCard(conversation) {
       .setHeader('Conversation');
 
     conversation.forEach(function(msg) {
-      var label = msg.role === 'user' ? '  You' : '  Assistant';
+      var label = msg.role === 'user' ? 'You' : 'Assistant';
       threadSection.addWidget(
         CardService.newDecoratedText()
-          .setTopLabel(label)
-          .setText(msg.content)
+          .setTopLabel(ltr(label))
+          .setText(ltr(msg.content))
           .setWrapText(true)
       );
     });
@@ -176,7 +181,7 @@ function buildChatCard(conversation) {
     var emptySection = CardService.newCardSection();
     emptySection.addWidget(
       CardService.newDecoratedText()
-        .setText('Ask me anything about this email — links, sender identity, suspicious patterns, or what action to take.')
+        .setText(ltr('Ask me anything about this email — links, sender identity, suspicious patterns, or what action to take.'))
         .setWrapText(true)
     );
     card.addSection(emptySection);
@@ -246,16 +251,16 @@ function buildSignalDetailCard(type, severity, value) {
 
   section.addWidget(
     CardService.newDecoratedText()
-      .setTopLabel('What this means')
-      .setText(description)
+      .setTopLabel(ltr('What this means'))
+      .setText(ltr(description))
       .setWrapText(true)
   );
 
   if (value) {
     section.addWidget(
       CardService.newDecoratedText()
-        .setTopLabel('Detected value')
-        .setText(value)
+        .setTopLabel(ltr('Detected value'))
+        .setText(ltr(value))
         .setWrapText(true)
     );
   }
