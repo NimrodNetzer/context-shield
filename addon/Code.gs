@@ -7,7 +7,7 @@
  *
  * Security boundaries enforced here:
  *  - Only plain text body extracted (no HTML, no raw MIME)
- *  - Attachment NAMES and MIME types only — content never sent
+ *  - Attachment NAMES only — content never sent
  *  - Body truncated client-side to 8000 chars before transmission
  *  - Scope requested: gmail.readonly only (cannot send, delete, or modify)
  */
@@ -27,13 +27,50 @@ function onGmailMessage(e) {
   GmailApp.setCurrentMessageAccessToken(accessToken);
   var message = GmailApp.getMessageById(messageId);
 
-  var payload = buildPayload(message, messageId);
+  var sender = message.getFrom() || '';
+  var subject = message.getSubject() || '';
+  var payload = buildPayload(message, messageId, sender, subject);
 
   try {
     var result = callAnalyzeEndpoint(payload);
-    return buildResultCard(result);
+    saveToHistory(messageId, sender, subject, result.verdict, result.score);
+    return buildResultCard(result, messageId, sender, subject);
   } catch (err) {
     return buildErrorCard(err.message);
+  }
+}
+
+/**
+ * Feedback action — user marks email as Safe.
+ */
+function onMarkSafe(e) {
+  var params = e.parameters;
+  submitFeedback(params.messageId, params.originalVerdict, 'SAFE');
+  return buildFeedbackConfirmCard('SAFE');
+}
+
+/**
+ * Feedback action — user marks email as a Threat.
+ */
+function onMarkThreat(e) {
+  var params = e.parameters;
+  submitFeedback(params.messageId, params.originalVerdict, 'MALICIOUS');
+  return buildFeedbackConfirmCard('MALICIOUS');
+}
+
+/**
+ * Sends feedback to the backend.
+ */
+function submitFeedback(messageId, originalVerdict, userVerdict) {
+  try {
+    callFeedbackEndpoint({
+      message_id: messageId,
+      original_verdict: originalVerdict,
+      user_verdict: userVerdict,
+    });
+  } catch (err) {
+    // Feedback failure is non-critical — log and continue
+    Logger.log('Feedback submission failed: ' + err.message);
   }
 }
 
@@ -41,7 +78,7 @@ function onGmailMessage(e) {
  * Builds a safe, bounded payload from a GmailMessage object.
  * Never includes attachment content.
  */
-function buildPayload(message, messageId) {
+function buildPayload(message, messageId, sender, subject) {
   var rawHeaders = parseAuthHeaders(message);
   var attachmentNames = getAttachmentNames(message);
 
@@ -52,9 +89,9 @@ function buildPayload(message, messageId) {
 
   return {
     message_id: messageId,
-    sender: message.getFrom() || '',
+    sender: sender,
     reply_to: message.getReplyTo() || null,
-    subject: message.getSubject() || '',
+    subject: subject,
     body_plain: bodyPlain,
     headers: rawHeaders,
     attachment_names: attachmentNames,
@@ -63,21 +100,11 @@ function buildPayload(message, messageId) {
 
 /**
  * Extracts SPF/DKIM/DMARC verdicts from raw message headers.
- * Apps Script doesn't expose raw headers directly — we parse from
- * the Authentication-Results header via a regex approach on the raw message.
  */
 function parseAuthHeaders(message) {
-  // Apps Script GmailMessage exposes limited header access.
-  // We surface what we can; backend heuristics handle the rest.
-  var headers = {
-    spf: null,
-    dkim: null,
-    dmarc: null,
-  };
+  var headers = { spf: null, dkim: null, dmarc: null };
 
   try {
-    // getHeader is available in advanced Gmail service;
-    // fall back gracefully if not available.
     var authResults = message.getHeader
       ? message.getHeader('Authentication-Results') || ''
       : '';
