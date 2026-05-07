@@ -22,7 +22,7 @@ import os
 
 from groq import Groq
 
-from models import Severity, Signal, Verdict
+from models import Signal, Verdict
 
 _GROQ_MODEL = "llama-3.3-70b-versatile"
 _MAX_TOKENS = 512

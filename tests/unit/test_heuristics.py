@@ -83,6 +83,14 @@ class TestReplyToMismatch:
         )
         assert "reply_to_mismatch" not in _signal_types(result)
 
+    def test_same_registered_domain_subdomain_no_signal(self):
+        # notifications@github.com replying to reply+...@reply.github.com — legit
+        result = _run(
+            sender="notifications@github.com",
+            reply_to="reply+abc@reply.github.com",
+        )
+        assert "reply_to_mismatch" not in _signal_types(result)
+
     def test_different_domain_signal(self):
         result = _run(
             sender="support@company.com",

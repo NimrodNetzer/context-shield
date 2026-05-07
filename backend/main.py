@@ -13,21 +13,22 @@ Errors never leak internal details to the caller.
 
 import logging
 import time
+from typing import Literal
 
 from dotenv import load_dotenv
+
 load_dotenv()  # loads .env when running locally; no-op in production
 
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, HTTPException, Request  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 
-from analyzer import analyze
-from auth import verify_oidc_token
-from chat import answer_question
-from feedback import log_feedback
-from models import AnalyzeRequest, AnalyzeResponse
-from pydantic import BaseModel, Field
-from typing import Literal
+from analyzer import analyze  # noqa: E402
+from auth import verify_oidc_token  # noqa: E402
+from chat import answer_question  # noqa: E402
+from feedback import log_feedback  # noqa: E402
+from models import AnalyzeRequest, AnalyzeResponse  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
