@@ -16,6 +16,7 @@ from email.utils import parseaddr
 from urllib.parse import urlparse
 
 from models import HeuristicResult, Severity, Signal
+from safebrowsing import check_urls
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -220,6 +221,21 @@ def _check_urls(body: str, signals: list[Signal]) -> int:
     return floor
 
 
+def _check_safe_browsing(urls: list[str], signals: list[Signal]) -> int:
+    matches = check_urls(urls)
+    if not matches:
+        return 0
+    for match in matches:
+        threat_type = match.get("threatType", "UNKNOWN")
+        url_value = match.get("threat", {}).get("url", "")[:80]
+        signals.append(Signal(
+            type="safe_browsing_hit",
+            severity=Severity.CRITICAL,
+            value=f"{threat_type}: {url_value}",
+        ))
+    return 85
+
+
 def _check_urgency(body: str, signals: list[Signal]) -> int:
     matches = URGENCY_PATTERNS.findall(body)
     if len(matches) >= 2:
@@ -251,7 +267,9 @@ def run_heuristics(
     floor = max(floor, _check_display_name_spoofing(sender, signals))
     floor = max(floor, _check_homoglyph_domain(sender, signals))
     floor = max(floor, _check_attachments(attachment_names, signals))
+    urls = _extract_urls(body)
     floor = max(floor, _check_urls(body, signals))
+    floor = max(floor, _check_safe_browsing(urls, signals))
     floor = max(floor, _check_urgency(body, signals))
 
     return HeuristicResult(signals=signals, score_floor=floor)

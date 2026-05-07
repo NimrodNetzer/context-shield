@@ -1,37 +1,63 @@
 /**
  * UI.gs — Card Service builders for the ContextShield add-on.
  *
- * Renders three states:
- *   1. Result card  — score, verdict, reasoning, signals
- *   2. Error card   — friendly message when analysis fails
- *   3. Loading card — shown while the backend call is in flight (contextual trigger auto-handles this)
+ * Renders four states:
+ *   1. Loading card  — shown immediately while analysis runs
+ *   2. Result card   — score, verdict, reasoning, signals, feedback, history
+ *   3. Error card    — friendly message when analysis fails
+ *   4. Feedback card — confirmation after user submits feedback
  */
 
-/** Verdict → display color mapping using Card Service DecoratedText colors */
 var VERDICT_COLORS = {
-  SAFE:       '#1e8e3e',   // green
-  SUSPICIOUS: '#f9ab00',   // amber
-  MALICIOUS:  '#d93025',   // red
+  SAFE:       '#1e8e3e',
+  SUSPICIOUS: '#f9ab00',
+  MALICIOUS:  '#d93025',
 };
 
-var SEVERITY_COLORS = {
-  low:      '#5f6368',
-  medium:   '#f9ab00',
-  high:     '#e37400',
-  critical: '#d93025',
-};
+var SCORE_BAR_LENGTH = 10;
 
 /**
- * Builds the main result card from a backend AnalyzeResponse.
- * @param {Object} result - { score, verdict, reasoning[], signals[] }
- * @returns {Card}
+ * Builds a filled/empty bar: ■■■■■□□□□□ 50/100
  */
-function buildResultCard(result) {
+function buildScoreBar(score) {
+  var filled = Math.round(score / 10);
+  var bar = '';
+  for (var i = 0; i < SCORE_BAR_LENGTH; i++) {
+    bar += i < filled ? '■' : '□';
+  }
+  return bar + ' ' + score + '/100';
+}
+
+/**
+ * Loading card — returned immediately before the backend call.
+ */
+function buildLoadingCard() {
+  var card = CardService.newCardBuilder()
+    .setName('contextshield_loading')
+    .setHeader(
+      CardService.newCardHeader()
+        .setTitle('ContextShield')
+        .setSubtitle('Analyzing email...')
+    );
+
+  var section = CardService.newCardSection();
+  section.addWidget(
+    CardService.newDecoratedText()
+      .setText('Scanning for threats...')
+      .setWrapText(true)
+  );
+  card.addSection(section);
+  return card.build();
+}
+
+/**
+ * Main result card.
+ */
+function buildResultCard(result, messageId, sender, subject) {
   var score = result.score || 0;
   var verdict = result.verdict || 'UNKNOWN';
   var reasoning = result.reasoning || [];
   var signals = result.signals || [];
-  var color = VERDICT_COLORS[verdict] || '#5f6368';
 
   var card = CardService.newCardBuilder()
     .setName('contextshield_result')
@@ -41,29 +67,31 @@ function buildResultCard(result) {
         .setSubtitle('Email Security Analysis')
     );
 
-  // -- Score + Verdict section --
+  // -- Score + Verdict --
   var scoreSection = CardService.newCardSection();
 
-  var verdictWidget = CardService.newDecoratedText()
-    .setTopLabel('Verdict')
-    .setText(verdict)
-    .setWrapText(false);
+  scoreSection.addWidget(
+    CardService.newDecoratedText()
+      .setTopLabel('Verdict')
+      .setText(verdict)
+      .setWrapText(false)
+  );
 
-  var scoreWidget = CardService.newDecoratedText()
-    .setTopLabel('Risk Score')
-    .setText(score.toString() + ' / 100')
-    .setWrapText(false);
+  scoreSection.addWidget(
+    CardService.newDecoratedText()
+      .setTopLabel('Risk Score')
+      .setText(buildScoreBar(score))
+      .setWrapText(false)
+  );
 
-  scoreSection.addWidget(verdictWidget);
-  scoreSection.addWidget(scoreWidget);
   card.addSection(scoreSection);
 
-  // -- Reasoning section --
+  // -- Reasoning --
   if (reasoning.length > 0) {
     var reasonSection = CardService.newCardSection()
       .setHeader('Why')
       .setCollapsible(true)
-      .setNumUncollapsibleWidgets(1);
+      .setNumUncollapsibleWidgets(2);
 
     reasoning.forEach(function(line) {
       reasonSection.addWidget(
@@ -76,7 +104,7 @@ function buildResultCard(result) {
     card.addSection(reasonSection);
   }
 
-  // -- Signals section --
+  // -- Signals --
   if (signals.length > 0) {
     var signalSection = CardService.newCardSection()
       .setHeader('Signals (' + signals.length + ')')
@@ -97,24 +125,95 @@ function buildResultCard(result) {
     card.addSection(signalSection);
   }
 
-  // -- Re-analyze button --
+  // -- Feedback --
+  var feedbackSection = CardService.newCardSection().setHeader('Was this correct?');
+
+  var markSafeAction = CardService.newAction()
+    .setFunctionName('onMarkSafe')
+    .setParameters({ messageId: messageId, originalVerdict: verdict });
+
+  var markThreatAction = CardService.newAction()
+    .setFunctionName('onMarkThreat')
+    .setParameters({ messageId: messageId, originalVerdict: verdict });
+
+  feedbackSection.addWidget(
+    CardService.newButtonSet()
+      .addButton(
+        CardService.newTextButton()
+          .setText('✓ Mark as Safe')
+          .setOnClickAction(markSafeAction)
+      )
+      .addButton(
+        CardService.newTextButton()
+          .setText('⚠ Mark as Threat')
+          .setOnClickAction(markThreatAction)
+      )
+  );
+
+  card.addSection(feedbackSection);
+
+  // -- Re-analyze --
   var actionSection = CardService.newCardSection();
   var reanalyzeAction = CardService.newAction().setFunctionName('onGmailMessage');
-  var reanalyzeButton = CardService.newTextButton()
-    .setText('Re-analyze')
-    .setOnClickAction(reanalyzeAction);
   actionSection.addWidget(
-    CardService.newButtonSet().addButton(reanalyzeButton)
+    CardService.newButtonSet().addButton(
+      CardService.newTextButton()
+        .setText('Re-analyze')
+        .setOnClickAction(reanalyzeAction)
+    )
   );
   card.addSection(actionSection);
+
+  // -- History --
+  var history = getHistory();
+  if (history.length > 0) {
+    var historySection = CardService.newCardSection()
+      .setHeader('Recent (' + history.length + ')')
+      .setCollapsible(true)
+      .setNumUncollapsibleWidgets(0);
+
+    history.forEach(function(item) {
+      var label = item.verdict + ' · ' + item.score + '/100';
+      var text = (item.subject || '(no subject)').substring(0, 50);
+      historySection.addWidget(
+        CardService.newDecoratedText()
+          .setTopLabel(label)
+          .setText(text)
+          .setBottomLabel(item.sender.substring(0, 40))
+          .setWrapText(false)
+      );
+    });
+
+    card.addSection(historySection);
+  }
 
   return card.build();
 }
 
 /**
- * Builds a friendly error card when the backend call fails.
- * @param {string} message - The error message (user-safe).
- * @returns {Card}
+ * Feedback confirmation card.
+ */
+function buildFeedbackConfirmCard(userVerdict) {
+  var card = CardService.newCardBuilder()
+    .setName('contextshield_feedback')
+    .setHeader(
+      CardService.newCardHeader()
+        .setTitle('ContextShield')
+        .setSubtitle('Feedback recorded')
+    );
+
+  var section = CardService.newCardSection();
+  section.addWidget(
+    CardService.newDecoratedText()
+      .setText('Marked as: ' + userVerdict + '. Thank you for the correction.')
+      .setWrapText(true)
+  );
+  card.addSection(section);
+  return card.build();
+}
+
+/**
+ * Error card.
  */
 function buildErrorCard(message) {
   var card = CardService.newCardBuilder()
@@ -133,10 +232,13 @@ function buildErrorCard(message) {
   );
 
   var retryAction = CardService.newAction().setFunctionName('onGmailMessage');
-  var retryButton = CardService.newTextButton()
-    .setText('Retry')
-    .setOnClickAction(retryAction);
-  section.addWidget(CardService.newButtonSet().addButton(retryButton));
+  section.addWidget(
+    CardService.newButtonSet().addButton(
+      CardService.newTextButton()
+        .setText('Retry')
+        .setOnClickAction(retryAction)
+    )
+  );
 
   card.addSection(section);
   return card.build();
