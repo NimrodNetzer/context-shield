@@ -48,12 +48,13 @@ class AnalyzeRequest(BaseModel):
     subject: str = Field(default="", max_length=998)
     body_plain: str = Field(default="", max_length=16_000)
     headers: EmailHeaders = Field(default_factory=EmailHeaders)
-    attachment_names: list[str] = Field(default_factory=list, max_length=20)
+    attachment_names: list[str] = Field(default_factory=list)
 
     @field_validator("attachment_names")
     @classmethod
     def validate_attachment_names(cls, v: list[str]) -> list[str]:
-        return [name[:255] for name in v]
+        # Silently truncate list and individual names rather than rejecting
+        return [name[:255] for name in v[:20]]
 
 
 # ---------------------------------------------------------------------------
