@@ -93,7 +93,7 @@ function buildResultCard(result, messageId, sender, subject) {
     card.addSection(signalSection);
   }
 
-  // Action row: Open Chat + Re-analyze
+  // Action row
   var actionSection = CardService.newCardSection();
   actionSection.addWidget(
     CardService.newButtonSet()
@@ -104,39 +104,16 @@ function buildResultCard(result, messageId, sender, subject) {
       )
       .addButton(
         CardService.newTextButton()
+          .setText('🕐  History')
+          .setOnClickAction(CardService.newAction().setFunctionName('onOpenHistory'))
+      )
+      .addButton(
+        CardService.newTextButton()
           .setText('↺  Re-analyze')
           .setOnClickAction(CardService.newAction().setFunctionName('onGmailMessage'))
       )
   );
   card.addSection(actionSection);
-
-  // History chips
-  var history = getHistory();
-  if (history.length > 0) {
-    var historySection = CardService.newCardSection()
-      .setHeader('Recent');
-
-    history.forEach(function(item) {
-      var chip = item.verdict + '  ' + item.score + '/100  ·  ' +
-        (item.subject || '(no subject)').substring(0, 28);
-      historySection.addWidget(
-        CardService.newTextButton()
-          .setText(chip)
-          .setOnClickAction(
-            CardService.newAction()
-              .setFunctionName('onHistoryItemClick')
-              .setParameters({
-                sender: item.sender || '',
-                subject: item.subject || '',
-                verdict: item.verdict,
-                score: String(item.score),
-                analyzedAt: item.analyzedAt || '',
-              })
-          )
-      );
-    });
-    card.addSection(historySection);
-  }
 
   return card.build();
 }
@@ -278,40 +255,156 @@ function buildSignalDetailCard(type, severity, value) {
 }
 
 // ---------------------------------------------------------------------------
-// History detail card
+// History page card — full list with delete options
 // ---------------------------------------------------------------------------
 
-function buildHistoryDetailCard(sender, subject, verdict, score, analyzedAt) {
+function buildHistoryPageCard(history) {
+  var card = CardService.newCardBuilder()
+    .setName('contextshield_history_page')
+    .setHeader(
+      CardService.newCardHeader().setTitle(ltr('Analysis History'))
+    );
+
+  card.addCardAction(
+    CardService.newCardAction()
+      .setText('← Back')
+      .setOnClickAction(CardService.newAction().setFunctionName('onGmailMessage'))
+  );
+
+  if (!history || history.length === 0) {
+    var emptySection = CardService.newCardSection();
+    emptySection.addWidget(
+      CardService.newDecoratedText()
+        .setText(ltr('No history yet. Analyze an email to get started.'))
+        .setWrapText(true)
+    );
+    card.addSection(emptySection);
+    return card.build();
+  }
+
+  // Delete all
+  var controlSection = CardService.newCardSection();
+  controlSection.addWidget(
+    CardService.newButtonSet().addButton(
+      CardService.newTextButton()
+        .setText('🗑  Delete All History')
+        .setOnClickAction(CardService.newAction().setFunctionName('onDeleteAllHistory'))
+    )
+  );
+  card.addSection(controlSection);
+
+  // One section per history item
+  history.forEach(function(item) {
+    var itemSection = CardService.newCardSection()
+      .setHeader(ltr(item.verdict + '  ' + item.score + '/100'));
+
+    itemSection.addWidget(
+      CardService.newDecoratedText()
+        .setTopLabel(ltr('Subject'))
+        .setText(ltr(item.subject || '(no subject)'))
+        .setWrapText(false)
+    );
+    itemSection.addWidget(
+      CardService.newDecoratedText()
+        .setTopLabel(ltr('From'))
+        .setText(ltr(item.sender || 'Unknown'))
+        .setWrapText(false)
+    );
+
+    itemSection.addWidget(
+      CardService.newButtonSet()
+        .addButton(
+          CardService.newTextButton()
+            .setText('View details')
+            .setOnClickAction(
+              CardService.newAction()
+                .setFunctionName('onHistoryItemClick')
+                .setParameters({
+                  messageId: item.messageId || '',
+                  sender: item.sender || '',
+                  subject: item.subject || '',
+                  verdict: item.verdict,
+                  score: String(item.score),
+                  analyzedAt: item.analyzedAt || '',
+                  signals: JSON.stringify(item.signals || []),
+                })
+            )
+        )
+        .addButton(
+          CardService.newTextButton()
+            .setText('🗑 Delete')
+            .setOnClickAction(
+              CardService.newAction()
+                .setFunctionName('onDeleteHistoryItem')
+                .setParameters({ messageId: item.messageId || '' })
+            )
+        )
+    );
+
+    card.addSection(itemSection);
+  });
+
+  return card.build();
+}
+
+// ---------------------------------------------------------------------------
+// History detail card — verdict, score, risks
+// ---------------------------------------------------------------------------
+
+function buildHistoryDetailCard(sender, subject, verdict, score, analyzedAt, signals) {
   var card = CardService.newCardBuilder()
     .setName('contextshield_history_detail')
     .setHeader(
       CardService.newCardHeader()
-        .setTitle(verdict + '  ' + score + '/100')
-        .setSubtitle('Previous analysis')
+        .setTitle(ltr(verdict + '  ' + score + '/100'))
+        .setSubtitle(ltr('Previous analysis'))
     );
 
   var section = CardService.newCardSection();
   section.addWidget(
-    CardService.newDecoratedText().setTopLabel('Subject').setText(subject || '(no subject)').setWrapText(true)
+    CardService.newDecoratedText().setTopLabel(ltr('Subject')).setText(ltr(subject || '(no subject)')).setWrapText(true)
   );
   section.addWidget(
-    CardService.newDecoratedText().setTopLabel('From').setText(sender || 'Unknown').setWrapText(true)
+    CardService.newDecoratedText().setTopLabel(ltr('From')).setText(ltr(sender || 'Unknown')).setWrapText(true)
   );
   if (analyzedAt) {
     section.addWidget(
       CardService.newDecoratedText()
-        .setTopLabel('Analyzed at')
-        .setText(new Date(analyzedAt).toLocaleString())
+        .setTopLabel(ltr('Analyzed at'))
+        .setText(ltr(new Date(analyzedAt).toLocaleString()))
     );
   }
   section.addWidget(
     CardService.newButtonSet().addButton(
       CardService.newTextButton()
-        .setText('← Back')
-        .setOnClickAction(CardService.newAction().setFunctionName('onGmailMessage'))
+        .setText('← Back to history')
+        .setOnClickAction(CardService.newAction().setFunctionName('onOpenHistory'))
     )
   );
   card.addSection(section);
+
+  // Risks
+  if (signals && signals.length > 0) {
+    var riskSection = CardService.newCardSection().setHeader(ltr('Detected Risks'));
+    signals.forEach(function(signal) {
+      var label = (signal.type || '').replace(/_/g, ' ').toUpperCase();
+      var text = signal.value ? label + ': ' + signal.value : label;
+      riskSection.addWidget(
+        CardService.newDecoratedText()
+          .setTopLabel(ltr((signal.severity || '').toUpperCase()))
+          .setText(ltr(text))
+          .setWrapText(true)
+      );
+    });
+    card.addSection(riskSection);
+  } else {
+    var noRiskSection = CardService.newCardSection().setHeader(ltr('Risks'));
+    noRiskSection.addWidget(
+      CardService.newDecoratedText().setText(ltr('No specific risk signals detected.'))
+    );
+    card.addSection(noRiskSection);
+  }
+
   return card.build();
 }
 
