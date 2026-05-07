@@ -1,58 +1,28 @@
 /**
  * UI.gs — Card Service builders for the ContextShield add-on.
  *
- * Renders four states:
- *   1. Loading card  — shown immediately while analysis runs
- *   2. Result card   — score, verdict, reasoning, signals, feedback, history
- *   3. Error card    — friendly message when analysis fails
- *   4. Feedback card — confirmation after user submits feedback
+ * Cards:
+ *   buildResultCard()        — main analysis result
+ *   buildChatCard()          — persistent conversation thread
+ *   buildHistoryDetailCard() — expanded history item
+ *   buildErrorCard()         — error state
  */
-
-var VERDICT_COLORS = {
-  SAFE:       '#1e8e3e',
-  SUSPICIOUS: '#f9ab00',
-  MALICIOUS:  '#d93025',
-};
 
 var SCORE_BAR_LENGTH = 10;
 
-/**
- * Builds a filled/empty bar: ■■■■■□□□□□ 50/100
- */
 function buildScoreBar(score) {
   var filled = Math.round(score / 10);
   var bar = '';
   for (var i = 0; i < SCORE_BAR_LENGTH; i++) {
     bar += i < filled ? '■' : '□';
   }
-  return bar + ' ' + score + '/100';
+  return bar + '  ' + score + '/100';
 }
 
-/**
- * Loading card — returned immediately before the backend call.
- */
-function buildLoadingCard() {
-  var card = CardService.newCardBuilder()
-    .setName('contextshield_loading')
-    .setHeader(
-      CardService.newCardHeader()
-        .setTitle('ContextShield')
-        .setSubtitle('Analyzing email...')
-    );
+// ---------------------------------------------------------------------------
+// Result card
+// ---------------------------------------------------------------------------
 
-  var section = CardService.newCardSection();
-  section.addWidget(
-    CardService.newDecoratedText()
-      .setText('Scanning for threats...')
-      .setWrapText(true)
-  );
-  card.addSection(section);
-  return card.build();
-}
-
-/**
- * Main result card.
- */
 function buildResultCard(result, messageId, sender, subject) {
   var score = result.score || 0;
   var verdict = result.verdict || 'UNKNOWN';
@@ -63,54 +33,43 @@ function buildResultCard(result, messageId, sender, subject) {
     .setName('contextshield_result')
     .setHeader(
       CardService.newCardHeader()
-        .setTitle('ContextShield')
-        .setSubtitle('Email Security Analysis')
+        .setTitle('Email Security Analysis')
     );
 
-  // -- Score + Verdict --
+  // Score + verdict
   var scoreSection = CardService.newCardSection();
-
   scoreSection.addWidget(
     CardService.newDecoratedText()
       .setTopLabel('Verdict')
       .setText(verdict)
-      .setWrapText(false)
   );
-
   scoreSection.addWidget(
     CardService.newDecoratedText()
       .setTopLabel('Risk Score')
       .setText(buildScoreBar(score))
-      .setWrapText(false)
   );
-
   card.addSection(scoreSection);
 
-  // -- Reasoning --
+  // Reasoning
   if (reasoning.length > 0) {
     var reasonSection = CardService.newCardSection()
       .setHeader('Why')
       .setCollapsible(true)
       .setNumUncollapsibleWidgets(2);
-
     reasoning.forEach(function(line) {
       reasonSection.addWidget(
-        CardService.newDecoratedText()
-          .setText('• ' + line)
-          .setWrapText(true)
+        CardService.newDecoratedText().setText('• ' + line).setWrapText(true)
       );
     });
-
     card.addSection(reasonSection);
   }
 
-  // -- Signals --
+  // Signals
   if (signals.length > 0) {
     var signalSection = CardService.newCardSection()
       .setHeader('Signals (' + signals.length + ')')
       .setCollapsible(true)
       .setNumUncollapsibleWidgets(0);
-
     signals.forEach(function(signal) {
       var label = signal.type.replace(/_/g, ' ').toUpperCase();
       var text = signal.value ? label + ': ' + signal.value : label;
@@ -121,67 +80,33 @@ function buildResultCard(result, messageId, sender, subject) {
           .setWrapText(true)
       );
     });
-
     card.addSection(signalSection);
   }
 
-  // -- Chat --
+  // Chat input
   var chatSection = CardService.newCardSection().setHeader('Ask the assistant');
-
-  var chatInput = CardService.newTextInput()
-    .setFieldName('chat_question')
-    .setHint('e.g. Is this link safe? Why is the sender suspicious?')
-    .setMultiline(false);
-
-  var chatAction = CardService.newAction().setFunctionName('onChatSubmit');
-  var chatButton = CardService.newTextButton()
-    .setText('Ask')
-    .setOnClickAction(chatAction);
-
-  chatSection.addWidget(chatInput);
-  chatSection.addWidget(CardService.newButtonSet().addButton(chatButton));
-  card.addSection(chatSection);
-
-  // -- Feedback --
-  var feedbackSection = CardService.newCardSection().setHeader('Was this correct?');
-
-  var markSafeAction = CardService.newAction()
-    .setFunctionName('onMarkSafe')
-    .setParameters({ messageId: messageId, originalVerdict: verdict });
-
-  var markThreatAction = CardService.newAction()
-    .setFunctionName('onMarkThreat')
-    .setParameters({ messageId: messageId, originalVerdict: verdict });
-
-  feedbackSection.addWidget(
+  chatSection.addWidget(
+    CardService.newTextInput()
+      .setFieldName('chat_question')
+      .setHint('e.g. Is this link safe? Why is the sender suspicious?')
+      .setMultiline(false)
+  );
+  chatSection.addWidget(
     CardService.newButtonSet()
       .addButton(
         CardService.newTextButton()
-          .setText('✓ Mark as Safe')
-          .setOnClickAction(markSafeAction)
+          .setText('Ask →')
+          .setOnClickAction(CardService.newAction().setFunctionName('onChatSubmit'))
       )
       .addButton(
         CardService.newTextButton()
-          .setText('⚠ Mark as Threat')
-          .setOnClickAction(markThreatAction)
+          .setText('Re-analyze')
+          .setOnClickAction(CardService.newAction().setFunctionName('onGmailMessage'))
       )
   );
+  card.addSection(chatSection);
 
-  card.addSection(feedbackSection);
-
-  // -- Re-analyze --
-  var actionSection = CardService.newCardSection();
-  var reanalyzeAction = CardService.newAction().setFunctionName('onGmailMessage');
-  actionSection.addWidget(
-    CardService.newButtonSet().addButton(
-      CardService.newTextButton()
-        .setText('Re-analyze')
-        .setOnClickAction(reanalyzeAction)
-    )
-  );
-  card.addSection(actionSection);
-
-  // -- History — compact chips, click to expand --
+  // History chips
   var history = getHistory();
   if (history.length > 0) {
     var historySection = CardService.newCardSection()
@@ -190,96 +115,92 @@ function buildResultCard(result, messageId, sender, subject) {
       .setNumUncollapsibleWidgets(0);
 
     history.forEach(function(item) {
-      var chip = item.verdict + '  ' + item.score + '/100  · ' + (item.subject || '(no subject)').substring(0, 35);
-      var expandAction = CardService.newAction()
-        .setFunctionName('onHistoryItemClick')
-        .setParameters({
-          sender: item.sender,
-          subject: item.subject || '',
-          verdict: item.verdict,
-          score: String(item.score),
-          analyzedAt: item.analyzedAt || '',
-        });
-
+      var chip = item.verdict + '  ' + item.score + '/100  ·  ' +
+        (item.subject || '(no subject)').substring(0, 30);
       historySection.addWidget(
         CardService.newTextButton()
           .setText(chip)
-          .setOnClickAction(expandAction)
+          .setOnClickAction(
+            CardService.newAction()
+              .setFunctionName('onHistoryItemClick')
+              .setParameters({
+                sender: item.sender || '',
+                subject: item.subject || '',
+                verdict: item.verdict,
+                score: String(item.score),
+                analyzedAt: item.analyzedAt || '',
+              })
+          )
       );
     });
-
     card.addSection(historySection);
   }
 
   return card.build();
 }
 
-/**
- * Chat answer card — pushed on top of the result card.
- */
-function buildChatAnswerCard(question, answer) {
+// ---------------------------------------------------------------------------
+// Persistent chat card
+// ---------------------------------------------------------------------------
+
+function buildChatCard(conversation) {
   var card = CardService.newCardBuilder()
     .setName('contextshield_chat')
     .setHeader(
       CardService.newCardHeader()
-        .setTitle('ContextShield Assistant')
-        .setSubtitle('Security Q&A')
+        .setTitle('Security Assistant')
     );
 
-  var section = CardService.newCardSection();
+  // Conversation thread
+  if (conversation && conversation.length > 0) {
+    var threadSection = CardService.newCardSection().setHeader('Conversation');
+    conversation.forEach(function(msg) {
+      var label = msg.role === 'user' ? 'You' : 'Assistant';
+      threadSection.addWidget(
+        CardService.newDecoratedText()
+          .setTopLabel(label)
+          .setText(msg.content)
+          .setWrapText(true)
+      );
+    });
+    card.addSection(threadSection);
+  }
 
-  section.addWidget(
-    CardService.newDecoratedText()
-      .setTopLabel('Your question')
-      .setText(question)
-      .setWrapText(true)
+  // Next question input
+  var inputSection = CardService.newCardSection().setHeader('Continue the conversation');
+  inputSection.addWidget(
+    CardService.newTextInput()
+      .setFieldName('chat_question')
+      .setHint('Ask a follow-up question...')
+      .setMultiline(false)
   );
-
-  section.addWidget(
-    CardService.newDecoratedText()
-      .setTopLabel('Answer')
-      .setText(answer)
-      .setWrapText(true)
+  inputSection.addWidget(
+    CardService.newButtonSet()
+      .addButton(
+        CardService.newTextButton()
+          .setText('Ask →')
+          .setOnClickAction(CardService.newAction().setFunctionName('onChatSubmit'))
+      )
+      .addButton(
+        CardService.newTextButton()
+          .setText('Clear chat')
+          .setOnClickAction(CardService.newAction().setFunctionName('onClearChat'))
+      )
+      .addButton(
+        CardService.newTextButton()
+          .setText('← Back')
+          .setOnClickAction(CardService.newAction().setFunctionName('onGmailMessage'))
+      )
   );
+  card.addSection(inputSection);
 
-  var backAction = CardService.newAction().setFunctionName('onGmailMessage');
-  section.addWidget(
-    CardService.newButtonSet().addButton(
-      CardService.newTextButton()
-        .setText('← Back')
-        .setOnClickAction(backAction)
-    )
-  );
-
-  card.addSection(section);
   return card.build();
 }
 
-/**
- * Feedback confirmation card.
- */
-function buildFeedbackConfirmCard(userVerdict) {
-  var card = CardService.newCardBuilder()
-    .setName('contextshield_feedback')
-    .setHeader(
-      CardService.newCardHeader()
-        .setTitle('ContextShield')
-        .setSubtitle('Feedback recorded')
-    );
+// ---------------------------------------------------------------------------
+// History detail card
+// ---------------------------------------------------------------------------
 
-  var section = CardService.newCardSection();
-  section.addWidget(
-    CardService.newDecoratedText()
-      .setText('Marked as: ' + userVerdict + '. Thank you for the correction.')
-      .setWrapText(true)
-  );
-  card.addSection(section);
-  return card.build();
-}
-
-/**
- * History item detail card — shown when user clicks a history chip.
- */
 function buildHistoryDetailCard(sender, subject, verdict, score, analyzedAt) {
   var card = CardService.newCardBuilder()
     .setName('contextshield_history_detail')
@@ -290,53 +211,39 @@ function buildHistoryDetailCard(sender, subject, verdict, score, analyzedAt) {
     );
 
   var section = CardService.newCardSection();
-
   section.addWidget(
-    CardService.newDecoratedText()
-      .setTopLabel('Subject')
-      .setText(subject || '(no subject)')
-      .setWrapText(true)
+    CardService.newDecoratedText().setTopLabel('Subject').setText(subject || '(no subject)').setWrapText(true)
   );
-
   section.addWidget(
-    CardService.newDecoratedText()
-      .setTopLabel('From')
-      .setText(sender || 'Unknown')
-      .setWrapText(true)
+    CardService.newDecoratedText().setTopLabel('From').setText(sender || 'Unknown').setWrapText(true)
   );
-
   if (analyzedAt) {
     section.addWidget(
       CardService.newDecoratedText()
         .setTopLabel('Analyzed at')
         .setText(new Date(analyzedAt).toLocaleString())
-        .setWrapText(false)
     );
   }
-
-  var backAction = CardService.newAction().setFunctionName('onGmailMessage');
   section.addWidget(
     CardService.newButtonSet().addButton(
       CardService.newTextButton()
         .setText('← Back')
-        .setOnClickAction(backAction)
+        .setOnClickAction(CardService.newAction().setFunctionName('onGmailMessage'))
     )
   );
-
   card.addSection(section);
   return card.build();
 }
 
-/**
- * Error card.
- */
+// ---------------------------------------------------------------------------
+// Error card
+// ---------------------------------------------------------------------------
+
 function buildErrorCard(message) {
   var card = CardService.newCardBuilder()
     .setName('contextshield_error')
     .setHeader(
-      CardService.newCardHeader()
-        .setTitle('ContextShield')
-        .setSubtitle('Analysis unavailable')
+      CardService.newCardHeader().setTitle('Email Security Analysis')
     );
 
   var section = CardService.newCardSection();
@@ -345,16 +252,13 @@ function buildErrorCard(message) {
       .setText(message || 'Could not reach the analysis service. Please try again.')
       .setWrapText(true)
   );
-
-  var retryAction = CardService.newAction().setFunctionName('onGmailMessage');
   section.addWidget(
     CardService.newButtonSet().addButton(
       CardService.newTextButton()
         .setText('Retry')
-        .setOnClickAction(retryAction)
+        .setOnClickAction(CardService.newAction().setFunctionName('onGmailMessage'))
     )
   );
-
   card.addSection(section);
   return card.build();
 }
