@@ -53,6 +53,32 @@ function onGmailMessage(e) {
 }
 
 // ---------------------------------------------------------------------------
+// Navigation
+// ---------------------------------------------------------------------------
+
+function onOpenChat(e) {
+  var props = PropertiesService.getUserProperties();
+  var conversation = [];
+  try { conversation = JSON.parse(props.getProperty(CHAT_HISTORY_KEY) || '[]'); } catch(ex) {}
+  return CardService.newActionResponseBuilder()
+    .setNavigation(
+      CardService.newNavigation().pushCard(buildChatCard(conversation))
+    )
+    .build();
+}
+
+function onSignalClick(e) {
+  var p = e.parameters;
+  return CardService.newActionResponseBuilder()
+    .setNavigation(
+      CardService.newNavigation().pushCard(
+        buildSignalDetailCard(p.type, p.severity, p.value)
+      )
+    )
+    .build();
+}
+
+// ---------------------------------------------------------------------------
 // Chat
 // ---------------------------------------------------------------------------
 
@@ -105,6 +131,8 @@ function onChatSubmit(e) {
     )
     .build();
 }
+
+
 
 function onClearChat(e) {
   PropertiesService.getUserProperties().deleteProperty(CHAT_HISTORY_KEY);
