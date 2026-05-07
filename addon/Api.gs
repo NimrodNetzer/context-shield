@@ -51,3 +51,28 @@ function callAnalyzeEndpoint(payload) {
 
   return JSON.parse(response.getContentText());
 }
+
+/**
+ * Calls the backend /feedback endpoint.
+ * Non-critical — errors are caught by the caller.
+ */
+function callFeedbackEndpoint(payload) {
+  var token = ScriptApp.getIdentityToken();
+
+  var options = {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  };
+
+  var response = UrlFetchApp.fetch(BACKEND_URL + '/feedback', options);
+  var statusCode = response.getResponseCode();
+
+  if (statusCode < 200 || statusCode >= 300) {
+    throw new Error('Feedback endpoint returned status ' + statusCode);
+  }
+}
