@@ -156,15 +156,22 @@ def _check_display_name_spoofing(sender: str, signals: list[Signal]) -> int:
 def _check_homoglyph_domain(sender: str, signals: list[Signal]) -> int:
     domain = _extract_domain(sender) or ""
     domain_norm = _normalize_homoglyphs(domain)
-    parts = domain_norm.split(".")
-    # Registered domain = last two parts (e.g. "google.com")
-    registered = ".".join(parts[-2:]) if len(parts) >= 2 else domain_norm
+    parts_norm = domain_norm.split(".")
+    registered_norm = ".".join(parts_norm[-2:]) if len(parts_norm) >= 2 else domain_norm
+
+    # Also compute registered domain from the ORIGINAL (un-normalized) domain
+    parts_orig = domain.lower().split(".")
+    registered_orig = ".".join(parts_orig[-2:]) if len(parts_orig) >= 2 else domain.lower()
+
     for brand in KNOWN_BRANDS:
         brand_norm = _normalize_homoglyphs(brand.replace(" ", ""))
         if brand_norm not in domain_norm:
             continue
-        # Skip if brand legitimately owns the registered domain
-        if brand_norm in registered:
+        # Legit if the ORIGINAL registered domain already contains the brand literally
+        if brand_norm in registered_orig:
+            continue
+        # Also legit if normalized registered equals original registered (no homoglyph used)
+        if registered_norm == registered_orig:
             continue
         signals.append(Signal(
             type="homoglyph_domain",
@@ -237,12 +244,14 @@ def _check_safe_browsing(urls: list[str], signals: list[Signal]) -> int:
 
 
 def _check_urgency(body: str, signals: list[Signal]) -> int:
-    matches = URGENCY_PATTERNS.findall(body)
+    raw_matches = URGENCY_PATTERNS.findall(body)
+    # findall returns tuples when regex has groups — flatten to strings
+    matches = [m[0] if isinstance(m, tuple) else m for m in raw_matches]
     if len(matches) >= 2:
         signals.append(Signal(type="urgency_language", severity=Severity.MEDIUM, value=f"{len(matches)} patterns"))
         return 20
     if matches:
-        signals.append(Signal(type="urgency_language", severity=Severity.LOW, value=matches[0]))
+        signals.append(Signal(type="urgency_language", severity=Severity.LOW, value=str(matches[0])))
         return 10
     return 0
 
