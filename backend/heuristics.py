@@ -117,12 +117,23 @@ def _check_auth_headers(headers, signals: list[Signal]) -> int:
     return floor
 
 
+def _registered_domain(domain: str) -> str:
+    """Returns the registered domain (last two parts): mail.github.com → github.com"""
+    parts = domain.lower().split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else domain.lower()
+
+
 def _check_reply_to_mismatch(sender: str, reply_to: str | None, signals: list[Signal]) -> int:
     if not reply_to:
         return 0
     sender_domain = _extract_domain(sender)
     reply_domain = _extract_domain(reply_to)
-    if sender_domain and reply_domain and sender_domain != reply_domain:
+    if not sender_domain or not reply_domain:
+        return 0
+    # Allow subdomains of the same registered domain — e.g. github.com vs reply.github.com
+    if _registered_domain(sender_domain) == _registered_domain(reply_domain):
+        return 0
+    if sender_domain != reply_domain:
         signals.append(Signal(
             type="reply_to_mismatch",
             severity=Severity.HIGH,
