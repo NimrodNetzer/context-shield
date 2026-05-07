@@ -1,9 +1,10 @@
 """
 ContextShield — FastAPI backend entry point.
 
-Exposes two endpoints:
-  POST /analyze  — authenticated, rate-limited email analysis
-  GET  /health   — unauthenticated liveness probe for Cloud Run
+Exposes three endpoints:
+  POST /analyze   — authenticated, rate-limited email analysis
+  POST /feedback  — authenticated, user verdict correction logging
+  GET  /health    — unauthenticated liveness probe for Cloud Run
 
 Security headers are added to every response via middleware.
 Errors never leak internal details to the caller.
@@ -21,7 +22,10 @@ from fastapi.responses import JSONResponse
 
 from analyzer import analyze
 from auth import verify_oidc_token
+from feedback import log_feedback
 from models import AnalyzeRequest, AnalyzeResponse
+from pydantic import BaseModel, Field
+from typing import Literal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -124,3 +128,27 @@ async def analyze_email(
     )
 
     return result
+
+
+class FeedbackRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    message_id: str = Field(..., min_length=1, max_length=64)
+    original_verdict: Literal["SAFE", "SUSPICIOUS", "MALICIOUS"]
+    user_verdict: Literal["SAFE", "MALICIOUS"]
+
+
+@app.post("/feedback", status_code=204)
+async def submit_feedback(
+    request: FeedbackRequest,
+    caller: str = Depends(verify_oidc_token),
+):
+    """
+    Records a user correction to a verdict.
+    Used to flag false positives and false negatives.
+    """
+    log_feedback(
+        message_id=request.message_id,
+        original_verdict=request.original_verdict,
+        user_verdict=request.user_verdict,
+        caller=caller,
+    )
