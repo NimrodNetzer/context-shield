@@ -39,7 +39,7 @@ function onGmailMessage(e) {
 
   try {
     var result = callAnalyzeEndpoint(payload);
-    saveToHistory(messageId, sender, subject, result.verdict, result.score);
+    saveToHistory(messageId, sender, subject, result.verdict, result.score, result.signals || []);
 
     var props = PropertiesService.getUserProperties();
     var prevMessageId = props.getProperty(CURRENT_MESSAGE_ID_KEY);
@@ -84,6 +84,32 @@ function onOpenChat(e) {
   return CardService.newActionResponseBuilder()
     .setNavigation(
       CardService.newNavigation().pushCard(buildChatCard(conversation, messageId))
+    )
+    .build();
+}
+
+function onOpenHistory(e) {
+  return CardService.newActionResponseBuilder()
+    .setNavigation(
+      CardService.newNavigation().pushCard(buildHistoryPageCard(getHistory()))
+    )
+    .build();
+}
+
+function onDeleteAllHistory(e) {
+  deleteAllHistory();
+  return CardService.newActionResponseBuilder()
+    .setNavigation(
+      CardService.newNavigation().updateCard(buildHistoryPageCard([]))
+    )
+    .build();
+}
+
+function onDeleteHistoryItem(e) {
+  deleteHistoryItem(e.parameters.messageId);
+  return CardService.newActionResponseBuilder()
+    .setNavigation(
+      CardService.newNavigation().updateCard(buildHistoryPageCard(getHistory()))
     )
     .build();
 }
@@ -171,10 +197,12 @@ function onClearChat(e) {
 
 function onHistoryItemClick(e) {
   var p = e.parameters;
+  var signals = [];
+  try { signals = JSON.parse(p.signals || '[]'); } catch(ex) {}
   return CardService.newActionResponseBuilder()
     .setNavigation(
       CardService.newNavigation().pushCard(
-        buildHistoryDetailCard(p.sender, p.subject, p.verdict, parseInt(p.score), p.analyzedAt)
+        buildHistoryDetailCard(p.sender, p.subject, p.verdict, parseInt(p.score), p.analyzedAt, signals)
       )
     )
     .build();
