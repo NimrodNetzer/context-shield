@@ -24,7 +24,7 @@ from groq import Groq
 
 from models import Severity, Signal, Verdict
 
-_GROQ_MODEL = "llama-3.1-70b-versatile"
+_GROQ_MODEL = "llama-3.3-70b-versatile"
 _MAX_TOKENS = 512
 _TEMPERATURE = 0.1   # low temperature → more deterministic security assessments
 
