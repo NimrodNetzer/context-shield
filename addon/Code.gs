@@ -10,18 +10,27 @@
 
 var BODY_MAX_CHARS = 8000;
 var ATTACHMENT_MAX_COUNT = 20;
-var CHAT_HISTORY_KEY = 'contextshield_chat_history';
 var EMAIL_CONTEXT_KEY = 'contextshield_email_context';
+var CURRENT_MESSAGE_ID_KEY = 'contextshield_current_message_id';
+
+function chatKeyForMessage(messageId) {
+  return 'contextshield_chat_' + messageId;
+}
 
 // ---------------------------------------------------------------------------
 // Contextual trigger
 // ---------------------------------------------------------------------------
 
 function onGmailMessage(e) {
-  var messageId = e.gmail.messageId;
-  var accessToken = e.gmail.accessToken;
+  var messageId = e.gmail ? e.gmail.messageId : null;
+  if (!messageId) {
+    // Called from re-analyze or back button without event context — reload from current
+    var props = PropertiesService.getUserProperties();
+    messageId = props.getProperty(CURRENT_MESSAGE_ID_KEY);
+  }
+  var accessToken = e.gmail ? e.gmail.accessToken : null;
 
-  GmailApp.setCurrentMessageAccessToken(accessToken);
+  if (accessToken) GmailApp.setCurrentMessageAccessToken(accessToken);
   var message = GmailApp.getMessageById(messageId);
 
   var sender = message.getFrom() || '';
@@ -32,11 +41,15 @@ function onGmailMessage(e) {
     var result = callAnalyzeEndpoint(payload);
     saveToHistory(messageId, sender, subject, result.verdict, result.score);
 
+    var props = PropertiesService.getUserProperties();
+    var prevMessageId = props.getProperty(CURRENT_MESSAGE_ID_KEY);
+
     // Store context for chat — only snippet, never full body
     var bodySnippet = (payload.body_plain || '').substring(0, 500);
-    PropertiesService.getUserProperties().setProperty(
+    props.setProperty(
       EMAIL_CONTEXT_KEY,
       JSON.stringify({
+        messageId: messageId,
         sender: sender,
         subject: subject,
         bodySnippet: bodySnippet,
@@ -45,6 +58,13 @@ function onGmailMessage(e) {
         signals: result.signals || [],
       })
     );
+
+    // Clear chat when switching emails or re-analyzing
+    if (prevMessageId && prevMessageId !== messageId) {
+      props.deleteProperty(chatKeyForMessage(prevMessageId));
+    }
+    props.deleteProperty(chatKeyForMessage(messageId)); // clear on re-analyze
+    props.setProperty(CURRENT_MESSAGE_ID_KEY, messageId);
 
     return buildResultCard(result, messageId, sender, subject);
   } catch (err) {
@@ -58,11 +78,12 @@ function onGmailMessage(e) {
 
 function onOpenChat(e) {
   var props = PropertiesService.getUserProperties();
+  var messageId = props.getProperty(CURRENT_MESSAGE_ID_KEY) || '';
   var conversation = [];
-  try { conversation = JSON.parse(props.getProperty(CHAT_HISTORY_KEY) || '[]'); } catch(ex) {}
+  try { conversation = JSON.parse(props.getProperty(chatKeyForMessage(messageId)) || '[]'); } catch(ex) {}
   return CardService.newActionResponseBuilder()
     .setNavigation(
-      CardService.newNavigation().pushCard(buildChatCard(conversation))
+      CardService.newNavigation().pushCard(buildChatCard(conversation, messageId))
     )
     .build();
 }
@@ -92,13 +113,14 @@ function onChatSubmit(e) {
 
   var props = PropertiesService.getUserProperties();
   var ctx = {};
-  try { ctx = JSON.parse(props.getProperty(EMAIL_CONTEXT_KEY) || '{}'); } catch(e) {}
+  try { ctx = JSON.parse(props.getProperty(EMAIL_CONTEXT_KEY) || '{}'); } catch(ex) {}
 
-  // Load existing conversation
+  var messageId = ctx.messageId || props.getProperty(CURRENT_MESSAGE_ID_KEY) || '';
+  var chatKey = chatKeyForMessage(messageId);
+
   var conversation = [];
-  try { conversation = JSON.parse(props.getProperty(CHAT_HISTORY_KEY) || '[]'); } catch(e) {}
+  try { conversation = JSON.parse(props.getProperty(chatKey) || '[]'); } catch(ex) {}
 
-  // Get answer from backend
   var answer;
   try {
     answer = callChatEndpoint({
@@ -114,20 +136,18 @@ function onChatSubmit(e) {
     answer = 'Could not reach the assistant: ' + err.message;
   }
 
-  // Append to persistent conversation
   conversation.push({ role: 'user', content: question });
   conversation.push({ role: 'assistant', content: answer });
 
-  // Keep last 20 messages (10 exchanges)
   if (conversation.length > 20) {
     conversation = conversation.slice(conversation.length - 20);
   }
 
-  props.setProperty(CHAT_HISTORY_KEY, JSON.stringify(conversation));
+  props.setProperty(chatKey, JSON.stringify(conversation));
 
   return CardService.newActionResponseBuilder()
     .setNavigation(
-      CardService.newNavigation().updateCard(buildChatCard(conversation))
+      CardService.newNavigation().updateCard(buildChatCard(conversation, messageId))
     )
     .build();
 }
@@ -135,10 +155,12 @@ function onChatSubmit(e) {
 
 
 function onClearChat(e) {
-  PropertiesService.getUserProperties().deleteProperty(CHAT_HISTORY_KEY);
+  var props = PropertiesService.getUserProperties();
+  var messageId = props.getProperty(CURRENT_MESSAGE_ID_KEY) || '';
+  props.deleteProperty(chatKeyForMessage(messageId));
   return CardService.newActionResponseBuilder()
     .setNavigation(
-      CardService.newNavigation().updateCard(buildChatCard([]))
+      CardService.newNavigation().updateCard(buildChatCard([], messageId))
     )
     .build();
 }
