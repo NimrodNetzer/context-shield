@@ -1,17 +1,27 @@
 # ContextShield
 
-A Gmail Add-on that analyzes opened emails and produces a maliciousness score, verdict, and human-readable reasoning — built security-first.
+> A Gmail Add-on that analyzes opened emails for malicious intent — producing a risk score, verdict, and plain-language reasoning, with an interactive security assistant built in.
+
+[![CI](https://github.com/NimrodNetzer/context-shield/actions/workflows/ci.yml/badge.svg)](https://github.com/NimrodNetzer/context-shield/actions/workflows/ci.yml)
 
 ---
 
-## What It Does
+## Overview
 
-When you open an email in Gmail, ContextShield automatically analyzes it and displays:
+ContextShield turns every Gmail inbox into a security checkpoint. When you open an email, it automatically analyzes the message and shows:
 
-- A **risk score** (0–100)
+- A **risk score** (0–100) with a visual bar
 - A **verdict**: SAFE / SUSPICIOUS / MALICIOUS
-- **Plain-language reasoning** explaining the verdict
-- **Typed signals** — the specific indicators that fired (DKIM fail, spoofed sender, dangerous attachment, etc.)
+- **Plain-language reasoning** — why the email was flagged
+- **Tappable signal chips** — each one explains the specific threat it detected
+- A **Security Assistant** — ask follow-up questions about the email directly in the sidebar
+- An **Analysis History** — browse and manage previously analyzed emails
+
+The core design principle:
+
+> **Heuristics are the security engine. The LLM is the explainability layer.**
+
+Security decisions are made by deterministic, auditable code. The LLM synthesizes signals into human-readable reasoning and catches subtle social engineering the rules miss. A `score_floor` from heuristics ensures the LLM can never be prompt-injected into downgrading a verdict.
 
 ---
 
@@ -22,67 +32,125 @@ Gmail (user opens email)
         │
         ▼
  Google Apps Script Add-on
-   • Extracts metadata + plain text only
+   • Extracts plain text + metadata only
    • Attachment content never leaves the client
-   • Signs every request with a Google OIDC token
-        │ HTTPS + OIDC
-        ▼
- FastAPI Backend on Cloud Run
-   ┌──────────────────────────────────────┐
-   │ 1. OIDC token verification           │
-   │ 2. Rate limiting (per identity)      │
-   │ 3. Input sanitization               │
-   │ 4. Heuristic engine  ← security core │
-   │ 5. Groq LLM          ← explainability│
-   │ 6. Pydantic output validation        │
-   └──────────────────────────────────────┘
+   • Body truncated client-side before transmission
+   • Signed with Google OIDC identity token
+        │
+        ▼  HTTPS + OIDC
+        │
+ FastAPI Backend (Python)
+   ┌─────────────────────────────────────────────┐
+   │  Gate 1 — OIDC token verification           │
+   │           audience exact-match to service   │
+   │  Gate 2 — Per-identity rate limiting        │
+   │  Gate 3 — Input sanitization               │
+   │           HTML strip, Unicode normalization │
+   │           hard truncation                   │
+   │                                             │
+   │  Stage 1 — Heuristic engine  ← security     │
+   │            13 deterministic signal checks   │
+   │            produces score_floor             │
+   │                                             │
+   │  Stage 2 — Groq LLM          ← explainability│
+   │            prompt injection defended        │
+   │            score clamped to floor           │
+   │                                             │
+   │  Gate 4 — Pydantic output validation        │
+   └─────────────────────────────────────────────┘
         │
         ▼
- Add-on Card UI — score, verdict, reasoning, signals
+ Gmail Add-on Card UI
+   • Score bar, verdict, reasoning
+   • Signal chips (tap to expand)
+   • Security Assistant (persistent chat)
+   • Analysis History
 ```
 
-### Why two stages?
+---
 
-**Heuristics are the security engine. The LLM is the explainability layer.**
+## Features
 
-Security decisions (DKIM/SPF/DMARC failures, homoglyph domains, dangerous attachments) are made by deterministic, auditable code. The LLM synthesizes these into plain-language reasoning and catches subtle social engineering the rules miss. A `score_floor` from heuristics ensures the LLM cannot be prompt-injected into downgrading a verdict.
+### Email Analysis
+- Automatic trigger when any email is opened
+- Risk score 0–100 with filled/empty bar visualization (`■■■■■□□□□□`)
+- Three-tier verdict: SAFE / SUSPICIOUS / MALICIOUS
+- 3–5 plain-English reasoning bullets from the LLM
+- Score floor enforced by heuristics — LLM cannot reduce it
+
+### Signal Detection (13 types)
+
+| Signal | What it catches | Severity |
+|---|---|---|
+| `dkim_fail` | Email signature mismatch | High |
+| `spf_fail` | Unauthorized sending server | High |
+| `dmarc_fail` | Domain policy violation | High |
+| `reply_to_mismatch` | Reply goes to different domain than sender | High |
+| `display_name_spoofing` | Brand name in display, different domain in address | Critical |
+| `homoglyph_domain` | Visually deceptive domain (paypa1.com, micrоsoft.com) | Critical |
+| `dangerous_attachment` | Executable or macro-capable file extension | Critical |
+| `suspicious_tld` | TLD statistically associated with abuse (.xyz, .tk) | High |
+| `url_shortener` | Shortened URL hiding destination | Medium |
+| `ip_as_hostname` | Raw IP address bypassing domain filters | High |
+| `ssrf_risk_url` | Private/internal IP range in email link | Critical |
+| `urgency_language` | Phishing language patterns ("verify now", "act immediately") | Low–Medium |
+| `safe_browsing_hit` | URL found in Google's threat intelligence database | Critical |
+
+Each signal chip is tappable — clicking opens a detail card explaining what the signal means and why it matters.
+
+### Security Assistant (Chat)
+- Ask any question about the current email directly in the sidebar
+- Full email context (snippet, verdict, signals) passed to the LLM automatically
+- Conversation persists per email — switching emails starts a fresh chat
+- Re-analyzing an email clears the previous conversation
+
+### Analysis History
+- Last 10 analyzed emails stored client-side in UserProperties (never on server)
+- Dedicated history page with per-item and bulk delete
+- Each history item shows verdict, score, sender, subject, and detected risks
+
+### Google Safe Browsing Integration
+- URLs extracted from email body checked against Google's threat database
+- Same threat intelligence used by Chrome, Firefox, and Safari
+- Fails open gracefully — analysis continues if API is unavailable
 
 ---
 
 ## Security Design
 
+Every layer of the system treats email content as adversarial input.
+
+### Threat Model → Mitigation
+
 | Threat | Mitigation |
 |---|---|
 | Unauthenticated backend calls | Google OIDC token, audience exact-match to service URL |
-| Token reuse / abuse | Per-identity rate limiting (30 req/min) |
-| Prompt injection via email body | XML delimiters, system/user role separation, explicit adversarial warning in system prompt |
-| LLM verdict manipulation | `score_floor` enforced in code — heuristic signals cannot be overridden by email content |
-| Malformed LLM output | Pydantic schema validation + score clamping |
-| SSRF via extracted URLs | No DNS resolution; private IP blocklist; scheme allowlist |
-| Attachment content leakage | Only filename + MIME type sent — never content |
-| API key exposure | GCP Secret Manager only; never in source or image |
-| Email content retention | Zero storage; only verdict + score logged |
-| Container privilege escalation | Non-root user; minimal base image (`python:3.12-slim`) |
-| Oversized / fuzzing payloads | Strict field length limits; `extra=forbid` on Pydantic model |
+| Token reuse / abuse | Per-identity rate limiting (30 req/min), not per-IP |
+| Prompt injection via email body | XML delimiters, system/user role separation, explicit adversarial warning |
+| LLM verdict manipulation | `score_floor` enforced in code — email content cannot override heuristics |
+| Malformed LLM output | Pydantic schema validation + score/verdict consistency enforcement |
+| SSRF via URL scanning | No DNS resolution; private IP blocklist; scheme allowlist |
+| Attachment content leakage | Only filename sent — content never extracted or transmitted |
+| API key exposure | Secret Manager only; never in source, image, or environment |
+| Email content retention | Zero storage; only verdict + score + latency logged |
+| Container privilege escalation | Non-root user; minimal `python:3.12-slim` base image |
+| Oversized / fuzzing payloads | Strict field length limits; `extra=forbid` on all Pydantic models |
 
----
+### Prompt Injection Defense (5 layers)
 
-## Heuristic Signals
+1. Email content placed in **user role only** — never in system prompt
+2. Wrapped in `<untrusted_email_content>` XML delimiters
+3. System prompt explicitly warns the model the content is adversarial
+4. Heuristic signals placed in **system role** — unreachable by email content
+5. `score_floor` enforced in `_parse_llm_response()` as hard code, independent of LLM output
 
-| Signal | What it detects | Severity |
-|---|---|---|
-| `dkim_fail` | DKIM signature verification failed | High |
-| `spf_fail` | SPF check failed or softfailed | High |
-| `dmarc_fail` | DMARC policy failed | High |
-| `reply_to_mismatch` | Reply-To domain differs from From domain | High |
-| `display_name_spoofing` | Display name contains a known brand but domain does not | Critical |
-| `homoglyph_domain` | Sender domain uses characters confusable with a known brand | Critical |
-| `dangerous_attachment` | Attachment extension is executable or macro-capable | Critical |
-| `suspicious_tld` | Domain uses a TLD commonly associated with abuse | High |
-| `url_shortener` | Email contains a URL shortener link | Medium |
-| `ip_as_hostname` | URL uses a raw IP address instead of a domain | High |
-| `ssrf_risk_url` | URL points to a private/internal IP range | Critical |
-| `urgency_language` | Email contains urgency or fear-based language patterns | Low–Medium |
+### Score Architecture
+
+The final score is a hybrid:
+- **Heuristics** compute a `score_floor` from deterministic rules (e.g. DKIM fail → floor 40, all three auth headers fail → floor 75)
+- **Groq LLM** returns a score ≥ `score_floor`, raising it if it detects additional threats
+- **Verdict thresholds** are hard-coded: 0–39 SAFE, 40–69 SUSPICIOUS, 70–100 MALICIOUS
+- The LLM's verdict string is ignored — verdict is always derived from the score
 
 ---
 
@@ -91,103 +159,201 @@ Security decisions (DKIM/SPF/DMARC failures, homoglyph domains, dangerous attach
 ```
 ContextShield/
 ├── addon/
-│   ├── appsscript.json   — manifest, OAuth scopes
-│   ├── Code.gs           — trigger entry point, payload builder
-│   ├── Api.gs            — backend call with OIDC token
-│   └── UI.gs             — Card Service UI builders
+│   ├── appsscript.json     manifest, OAuth scopes, urlFetchWhitelist
+│   ├── Code.gs             contextual trigger, payload builder, action handlers
+│   ├── Api.gs              backend HTTP calls with OIDC token
+│   ├── UI.gs               Card Service builders for all card states
+│   └── History.gs          UserProperties-based analysis history
 ├── backend/
-│   ├── main.py           — FastAPI app, routes, middleware
-│   ├── auth.py           — OIDC verification, rate limiter
-│   ├── sanitizer.py      — input cleaning pipeline
-│   ├── heuristics.py     — deterministic signal extraction
-│   ├── groq_client.py    — Groq wrapper, prompt injection defense
-│   ├── analyzer.py       — orchestrates stages + fallback
-│   ├── models.py         — Pydantic schemas
-│   ├── Dockerfile        — non-root, multi-stage, minimal image
-│   └── requirements.txt  — pinned dependencies
-├── cloudbuild.yaml        — one-command Cloud Run deploy
+│   ├── main.py             FastAPI app, routes, security middleware
+│   ├── auth.py             OIDC verification, per-identity rate limiter
+│   ├── sanitizer.py        HTML stripping, Unicode normalization, truncation
+│   ├── heuristics.py       13 deterministic signal checks, score_floor
+│   ├── groq_client.py      Groq wrapper, prompt injection defense
+│   ├── analyzer.py         two-stage orchestrator, LLM fallback
+│   ├── chat.py             conversational assistant endpoint
+│   ├── feedback.py         verdict correction logging
+│   ├── safebrowsing.py     Google Safe Browsing API client
+│   ├── models.py           Pydantic request/response schemas
+│   ├── Dockerfile          non-root, multi-stage, minimal image
+│   └── requirements.txt    pinned dependencies
+├── tests/
+│   ├── conftest.py         shared fixtures, TestClient setup
+│   ├── unit/               sanitizer, models, heuristics, Groq client, Safe Browsing
+│   └── integration/        /analyze, /chat, /feedback endpoint tests
+├── .github/
+│   └── workflows/ci.yml    GitHub Actions — tests + ruff lint on every push
+├── cloudbuild.yaml         one-command Cloud Run deployment
+├── DEVELOPMENT_NOTES.md    bugs found, fixes applied, lessons learned
 └── README.md
 ```
 
 ---
 
-## Setup & Deployment
+## Running Locally
 
 ### Prerequisites
 
-- GCP project with Cloud Run, Secret Manager, and Cloud Build enabled
-- Groq API key ([console.groq.com](https://console.groq.com))
-- Node.js + `clasp` CLI for Apps Script deployment (`npm install -g @google/clasp`)
+- Python 3.12
+- Node.js (for clasp)
+- [Groq API key](https://console.groq.com) (free)
+- [ngrok](https://ngrok.com) (free) — to expose the local backend to Gmail
 
-### 1. Store secrets in GCP Secret Manager
-
-```bash
-echo -n "your-groq-api-key" | gcloud secrets create groq-api-key --data-file=-
-echo -n "your-script@your-project.iam.gserviceaccount.com" \
-  | gcloud secrets create allowed-sa-emails --data-file=-
-```
-
-### 2. Deploy the backend
+### 1. Start the backend
 
 ```bash
-gcloud builds submit --config cloudbuild.yaml
+cd backend
+python -m venv .venv
+
+# macOS/Linux
+source .venv/bin/activate
+
+# Windows
+.venv\Scripts\activate
+
+pip install -r requirements.txt
 ```
 
-After deploy, note the Cloud Run service URL (e.g. `https://contextshield-backend-xxxx-uc.a.run.app`).
+Create a `.env` file in the `backend/` directory:
 
-Update `SERVICE_URL` in `cloudbuild.yaml` and redeploy, or set it directly:
+```
+GROQ_API_KEY=your-groq-api-key
+GOOGLE_SAFE_BROWSING_KEY=your-safe-browsing-key   # optional
+SERVICE_URL=                                        # leave empty for local dev
+ALLOWED_SA_EMAILS=                                  # leave empty for local dev
+```
+
+Start the server:
 
 ```bash
-gcloud run services update contextshield-backend \
-  --set-env-vars SERVICE_URL=https://contextshield-backend-xxxx-uc.a.run.app
+uvicorn main:app --reload --port 8080
 ```
+
+Health check: `curl http://localhost:8080/health` → `{"status":"ok"}`
+
+### 2. Expose via ngrok
+
+In a second terminal:
+
+```bash
+ngrok http 8080
+```
+
+Copy the `https://xxxx.ngrok-free.app` URL — you'll need it in the next step.
 
 ### 3. Deploy the add-on
 
 ```bash
+npm install -g @google/clasp
 cd addon
 clasp login
 clasp create --type standalone --title "ContextShield"
-# Set the backend URL in Script Properties
-clasp run 'PropertiesService.getScriptProperties().setProperty("BACKEND_URL", "https://contextshield-backend-xxxx-uc.a.run.app")'
 clasp push
+clasp deploy --description "v1"
 ```
 
-Then in the Apps Script editor: **Deploy → New deployment → Gmail Add-on**.
+Update the ngrok URL in `addon/Api.gs` (the fallback URL constant), then push again.
 
 ### 4. Install in Gmail
 
-Go to **Google Workspace Marketplace** (or use developer mode in Gmail settings) and install the add-on on your account.
+1. Go to [script.google.com](https://script.google.com), open the ContextShield project
+2. Click **Deploy → Test deployments → Install**
+3. Open Gmail — the ContextShield panel appears automatically when you open any email
+
+### Running Tests
+
+```bash
+# From the project root
+backend/.venv/Scripts/python -m pytest tests/ -v
+```
+
+**108 tests, all passing in under 1 second.**
+
+```
+tests/unit/test_sanitizer.py        12 tests
+tests/unit/test_models.py           15 tests
+tests/unit/test_heuristics.py       24 tests
+tests/unit/test_groq_client.py      16 tests
+tests/unit/test_safebrowsing.py      6 tests
+tests/integration/test_analyze      11 tests
+tests/integration/test_chat          5 tests
+tests/integration/test_feedback      5 tests
+```
+
+CI runs automatically on every push via GitHub Actions (tests + ruff lint).
 
 ---
 
-## Running Locally (for development)
+## Production Deployment (Cloud Run)
 
 ```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-pip install -r requirements.txt
-GROQ_API_KEY=your-key SERVICE_URL=http://localhost:8080 ALLOWED_SA_EMAILS="" \
-  uvicorn main:app --reload --port 8080
+# Store secrets
+echo -n "your-groq-key" | gcloud secrets create groq-api-key --data-file=-
+echo -n "your-sa@project.iam.gserviceaccount.com" \
+  | gcloud secrets create allowed-sa-emails --data-file=-
+
+# Deploy
+gcloud builds submit --config cloudbuild.yaml
 ```
 
-The `ALLOWED_SA_EMAILS=""` empty string disables the subject allowlist for local dev.
+The `cloudbuild.yaml` builds a Docker image, pushes to Container Registry, and deploys to Cloud Run with `--no-allow-unauthenticated` enforced.
 
-Health check: `curl http://localhost:8080/health`
+---
+
+## API Reference
+
+### `POST /analyze`
+Analyzes an email. Authentication required (OIDC Bearer token).
+
+**Request:**
+```json
+{
+  "message_id": "string",
+  "sender": "string",
+  "reply_to": "string | null",
+  "subject": "string",
+  "body_plain": "string (max 16,000 chars)",
+  "headers": { "spf": "pass|fail|...", "dkim": "pass|fail|...", "dmarc": "pass|fail|..." },
+  "attachment_names": ["string"]
+}
+```
+
+**Response:**
+```json
+{
+  "score": 87,
+  "verdict": "MALICIOUS",
+  "reasoning": ["Reply-To differs from sender domain", "DKIM and SPF both fail"],
+  "signals": [{ "type": "dkim_fail", "severity": "high", "value": null }],
+  "analysis_source": "heuristics+llm"
+}
+```
+
+### `POST /chat`
+Answers a follow-up question about an analyzed email.
+
+### `POST /feedback`
+Records a verdict correction (false positive / false negative).
+
+### `GET /health`
+Liveness probe. No authentication required.
 
 ---
 
 ## Trade-offs & What I'd Do With More Time
 
 **Trade-offs made:**
-- **In-process rate limiter** — works for a single Cloud Run instance. A Redis-backed limiter would be correct for multi-instance deployments.
-- **Groq / Llama 70B** — fast and free-tier friendly for demo purposes. A frontier model (Claude, GPT-4o) would catch subtler social engineering. The heuristic layer compensates significantly.
-- **No attachment content scanning** — a hard security boundary for privacy. A production version would pass attachment hashes to a threat-intel API (VirusTotal) rather than scanning content.
-- **`Authentication-Results` header parsing** — Apps Script doesn't expose raw MIME headers natively. The current approach parses what's available; a production version would use the Gmail API's full message resource for reliable header access.
+
+- **Groq (Llama 3.3-70b) over GPT-4** — sub-500ms inference makes the add-on feel instant. The heuristic layer compensates for the accuracy gap on subtle attacks.
+- **ngrok over Cloud Run** — no billing account required for demo. Cloud Run config is ready (`cloudbuild.yaml`) — one command away from production.
+- **In-process rate limiter** — simple and dependency-free. Would swap for Redis (`slowapi`) for multi-instance Cloud Run.
+- **Filename-only attachment analysis** — attachment content never leaves the client (privacy boundary). A production version would send SHA-256 hashes to VirusTotal.
+- **Apps Script UI constraints** — Card Service is visually limited (no custom CSS, no hover effects, no Enter-key submission). The trade-off for native Gmail integration with no publishing overhead.
 
 **With more time:**
-- VirusTotal integration for URL and attachment hash lookups
-- Domain age lookup (WHOIS) for newly registered sender domains
-- Redis rate limiter for multi-instance Cloud Run
-- Historical per-sender scoring within a user's account
-- Feedback loop: let users mark verdicts as wrong to improve accuracy
+
+- Domain age lookup (WHOIS) — newly registered domains are a top phishing indicator
+- VirusTotal integration for attachment hash and URL scanning
+- Redis-backed rate limiter for multi-instance deployments
+- Sender reputation memory — flag anomalies from known-safe senders
+- Structured JSON logging with Cloud Logging alerts on MALICIOUS verdicts
