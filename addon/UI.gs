@@ -214,7 +214,25 @@ function buildSignalDetailCard(type, severity, value) {
     safe_browsing_hit: 'This URL was found in Google\'s Safe Browsing database — the same threat intelligence used by Chrome, Firefox, and Safari to block malicious sites.',
   };
 
+  // MITRE ATT&CK technique mapping
+  var mitre = {
+    dkim_fail:             'T1566 · Phishing',
+    spf_fail:              'T1566 · Phishing',
+    dmarc_fail:            'T1566 · Phishing',
+    reply_to_mismatch:     'T1566 · Phishing',
+    display_name_spoofing: 'T1566 · Phishing',
+    homoglyph_domain:      'T1566 · Phishing',
+    dangerous_attachment:  'T1566.001 · Spearphishing Attachment',
+    suspicious_tld:        'T1566 · Phishing',
+    url_shortener:         'T1566.002 · Spearphishing Link',
+    ip_as_hostname:        'T1566.002 · Spearphishing Link',
+    ssrf_risk_url:         'T1190 · Exploit Public-Facing Application',
+    urgency_language:      'T1566 · Phishing (Social Engineering)',
+    safe_browsing_hit:     'T1566.002 · Spearphishing Link',
+  };
+
   var description = descriptions[type] || 'This signal was flagged as potentially suspicious based on analysis of the email metadata or content.';
+  var mitreId = mitre[type] || '';
 
   var card = CardService.newCardBuilder()
     .setName('contextshield_signal_detail')
@@ -232,6 +250,15 @@ function buildSignalDetailCard(type, severity, value) {
       .setText(ltr(description))
       .setWrapText(true)
   );
+
+  if (mitreId) {
+    section.addWidget(
+      CardService.newDecoratedText()
+        .setTopLabel(ltr('MITRE ATT&CK'))
+        .setText(ltr(mitreId))
+        .setWrapText(false)
+    );
+  }
 
   if (value) {
     section.addWidget(
@@ -296,7 +323,7 @@ function buildHistoryPageCard(history) {
   // One section per history item
   history.forEach(function(item) {
     var itemSection = CardService.newCardSection()
-      .setHeader(ltr(item.verdict + '  ' + item.score + '/100'));
+      .setHeader(ltr(item.verdict + '  ' + buildScoreBar(item.score)));
 
     itemSection.addWidget(
       CardService.newDecoratedText()
@@ -356,8 +383,8 @@ function buildHistoryDetailCard(sender, subject, verdict, score, analyzedAt, sig
     .setName('contextshield_history_detail')
     .setHeader(
       CardService.newCardHeader()
-        .setTitle(ltr(verdict + '  ' + score + '/100'))
-        .setSubtitle(ltr('Previous analysis'))
+        .setTitle(ltr(verdict))
+        .setSubtitle(ltr(buildScoreBar(score)))
     );
 
   var section = CardService.newCardSection();

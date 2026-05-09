@@ -78,25 +78,25 @@ Gmail (user opens email)
 - 3–5 plain-English reasoning bullets from the LLM
 - Score floor enforced by heuristics — LLM cannot reduce it
 
-### Signal Detection (13 types)
+### Signal Detection — 13 types mapped to MITRE ATT&CK
 
-| Signal | What it catches | Severity |
-|---|---|---|
-| `dkim_fail` | Email signature mismatch | High |
-| `spf_fail` | Unauthorized sending server | High |
-| `dmarc_fail` | Domain policy violation | High |
-| `reply_to_mismatch` | Reply goes to different domain than sender | High |
-| `display_name_spoofing` | Brand name in display, different domain in address | Critical |
-| `homoglyph_domain` | Visually deceptive domain (paypa1.com, micrоsoft.com) | Critical |
-| `dangerous_attachment` | Executable or macro-capable file extension | Critical |
-| `suspicious_tld` | TLD statistically associated with abuse (.xyz, .tk) | High |
-| `url_shortener` | Shortened URL hiding destination | Medium |
-| `ip_as_hostname` | Raw IP address bypassing domain filters | High |
-| `ssrf_risk_url` | Private/internal IP range in email link | Critical |
-| `urgency_language` | Phishing language patterns ("verify now", "act immediately") | Low–Medium |
-| `safe_browsing_hit` | URL found in Google's threat intelligence database | Critical |
+| Signal | What it catches | Severity | MITRE ATT&CK |
+|---|---|---|---|
+| `dkim_fail` | Email signature mismatch | High | T1566 · Phishing |
+| `spf_fail` | Unauthorized sending server | High | T1566 · Phishing |
+| `dmarc_fail` | Domain policy violation | High | T1566 · Phishing |
+| `reply_to_mismatch` | Reply goes to different domain than sender | High | T1566 · Phishing |
+| `display_name_spoofing` | Brand name in display, different domain in address | Critical | T1566 · Phishing |
+| `homoglyph_domain` | Visually deceptive domain (paypa1.com, micrоsoft.com) | Critical | T1566 · Phishing |
+| `dangerous_attachment` | Executable or macro-capable file extension | Critical | T1566.001 · Spearphishing Attachment |
+| `suspicious_tld` | TLD statistically associated with abuse (.xyz, .tk) | High | T1566 · Phishing |
+| `url_shortener` | Shortened URL hiding destination | Medium | T1566.002 · Spearphishing Link |
+| `ip_as_hostname` | Raw IP address bypassing domain filters | High | T1566.002 · Spearphishing Link |
+| `ssrf_risk_url` | Private/internal IP range in email link | Critical | T1190 · Exploit Public-Facing Application |
+| `urgency_language` | Phishing language patterns ("verify now", "act immediately") | Low–Medium | T1566 · Phishing |
+| `safe_browsing_hit` | URL found in Google's threat intelligence database | Critical | T1566.002 · Spearphishing Link |
 
-Each signal chip is tappable — clicking opens a detail card explaining what the signal means and why it matters.
+Each signal chip is tappable — clicking opens a detail card explaining what the signal means, its MITRE ATT&CK technique ID, and the detected value.
 
 ### Security Assistant (Chat)
 - Ask any question about the current email directly in the sidebar
@@ -151,6 +151,37 @@ The final score is a hybrid:
 - **Groq LLM** returns a score ≥ `score_floor`, raising it if it detects additional threats
 - **Verdict thresholds** are hard-coded: 0–39 SAFE, 40–69 SUSPICIOUS, 70–100 MALICIOUS
 - The LLM's verdict string is ignored — verdict is always derived from the score
+
+---
+
+## Industry Security Standards
+
+### MITRE ATT&CK
+
+All 13 heuristic signals are mapped to [MITRE ATT&CK](https://attack.mitre.org/) techniques — the industry-standard taxonomy for cyber threats used by security teams worldwide.
+
+| Technique | ID | Signals that detect it |
+|---|---|---|
+| Phishing | T1566 | dkim_fail, spf_fail, dmarc_fail, reply_to_mismatch, display_name_spoofing, homoglyph_domain, urgency_language |
+| Spearphishing Attachment | T1566.001 | dangerous_attachment |
+| Spearphishing Link | T1566.002 | url_shortener, ip_as_hostname, safe_browsing_hit |
+| Exploit Public-Facing Application | T1190 | ssrf_risk_url |
+
+Each signal chip in the UI shows the corresponding MITRE ATT&CK ID when tapped.
+
+### OWASP Top 10 Alignment
+
+The backend security design addresses the following [OWASP Top 10](https://owasp.org/www-project-top-ten/) categories:
+
+| OWASP Category | How ContextShield addresses it |
+|---|---|
+| **A01 Broken Access Control** | OIDC token with exact audience match; subject allowlist; rate limiting per identity |
+| **A02 Cryptographic Failures** | Email content never stored or transmitted beyond the analysis request; no PII retained |
+| **A03 Injection** | Prompt injection defense: XML delimiters, role separation, adversarial warning; HTML stripped before processing |
+| **A04 Insecure Design** | Threat model documented; security decisions delegated to deterministic code, not LLM |
+| **A05 Security Misconfiguration** | Swagger UI disabled in production; CORS locked to mail.google.com; non-root container |
+| **A06 Vulnerable Components** | All dependencies pinned to exact versions; minimal base image (python:3.12-slim) |
+| **A09 Security Logging & Monitoring** | Structured logs on every request; email content never logged; verdict + latency only |
 
 ---
 
