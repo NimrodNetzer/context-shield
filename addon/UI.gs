@@ -88,15 +88,6 @@ function buildResultCard(result, messageId, sender, subject) {
     card.addSection(signalSection);
   }
 
-  // Limitations note
-  var limitSection = CardService.newCardSection();
-  limitSection.addWidget(
-    CardService.newDecoratedText()
-      .setText(ltr('Not checked: URLs not fetched · attachments not opened · thread history not used'))
-      .setWrapText(true)
-  );
-  card.addSection(limitSection);
-
   // Action row
   var actionSection = CardService.newCardSection();
   actionSection.addWidget(
