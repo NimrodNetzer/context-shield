@@ -19,11 +19,13 @@ from sanitizer import sanitize_body, sanitize_sender, sanitize_subject
 logger = logging.getLogger(__name__)
 
 
-def _heuristic_verdict(score: int) -> Verdict:
+def _heuristic_verdict(score: int, has_signals: bool = True) -> Verdict:
     if score >= 70:
         return Verdict.MALICIOUS
     if score >= 40:
         return Verdict.SUSPICIOUS
+    if score == 0 and not has_signals:
+        return Verdict.INCONCLUSIVE
     return Verdict.SAFE
 
 
@@ -64,18 +66,24 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
             signals=signals,
             score_floor=score_floor,
         )
+        if score == 0 and not signals:
+            verdict = Verdict.INCONCLUSIVE
         source = "heuristics+llm"
     except Exception as exc:
         logger.warning("LLM call failed, falling back to heuristics-only: %s", exc)
-        score = max(score_floor, 10)   # baseline if no signals
-        verdict = _heuristic_verdict(score)
-        reasoning = [
-            "Analysis based on email metadata and header checks.",
-            *(
-                f"{s.type.replace('_', ' ').capitalize()}: {s.value or ''}"
-                for s in signals[:4]
-            ),
-        ] or ["No signals detected."]
+        score = score_floor
+        verdict = _heuristic_verdict(score, has_signals=bool(signals))
+        reasoning = (
+            [
+                "Analysis based on email metadata and header checks.",
+                *(
+                    f"{s.type.replace('_', ' ').capitalize()}: {s.value or ''}"
+                    for s in signals[:4]
+                ),
+            ]
+            if signals
+            else ["No suspicious signals detected. Cannot fully verify email authenticity."]
+        )
         source = "heuristics_only"
 
     return AnalyzeResponse(

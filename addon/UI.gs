@@ -29,36 +29,31 @@ function buildScoreBar(score) {
 // Result card
 // ---------------------------------------------------------------------------
 
+var VERDICT_ICON = {
+  SAFE:          '✅',
+  SUSPICIOUS:    '⚠️',
+  MALICIOUS:     '🚨',
+  INCONCLUSIVE:  '❓',
+};
+
 function buildResultCard(result, messageId, sender, subject) {
   var score = result.score || 0;
   var verdict = result.verdict || 'UNKNOWN';
   var reasoning = result.reasoning || [];
   var signals = result.signals || [];
+  var icon = VERDICT_ICON[verdict] || '•';
 
   var card = CardService.newCardBuilder()
     .setName('contextshield_result')
     .setHeader(
       CardService.newCardHeader()
-        .setTitle('Email Security Analysis')
+        .setTitle(ltr(icon + '  ' + verdict))
+        .setSubtitle(ltr(buildScoreBar(score)))
     );
-
-  // Score + verdict
-  var scoreSection = CardService.newCardSection();
-  scoreSection.addWidget(
-    CardService.newDecoratedText()
-      .setTopLabel(ltr('Verdict'))
-      .setText(ltr(verdict))
-  );
-  scoreSection.addWidget(
-    CardService.newDecoratedText()
-      .setTopLabel(ltr('Risk Score'))
-      .setText(ltr(buildScoreBar(score)))
-  );
-  card.addSection(scoreSection);
 
   // Reasoning
   if (reasoning.length > 0) {
-    var reasonSection = CardService.newCardSection().setHeader('Why');
+    var reasonSection = CardService.newCardSection().setHeader('Analysis');
     reasoning.forEach(function(line) {
       reasonSection.addWidget(
         CardService.newDecoratedText().setText(ltr('• ' + line)).setWrapText(true)
@@ -70,7 +65,7 @@ function buildResultCard(result, messageId, sender, subject) {
   // Signals — each one is a tappable chip that opens a detail card
   if (signals.length > 0) {
     var signalSection = CardService.newCardSection()
-      .setHeader('Signals  (' + signals.length + ')  — tap to expand');
+      .setHeader('Signals (' + signals.length + ') — tap to expand');
 
     signals.forEach(function(signal) {
       var label = signal.type.replace(/_/g, ' ').toUpperCase();
@@ -92,6 +87,15 @@ function buildResultCard(result, messageId, sender, subject) {
     });
     card.addSection(signalSection);
   }
+
+  // Limitations note
+  var limitSection = CardService.newCardSection();
+  limitSection.addWidget(
+    CardService.newDecoratedText()
+      .setText(ltr('Not checked: URLs not fetched · attachments not opened · thread history not used'))
+      .setWrapText(true)
+  );
+  card.addSection(limitSection);
 
   // Action row
   var actionSection = CardService.newCardSection();

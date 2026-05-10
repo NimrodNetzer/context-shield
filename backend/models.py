@@ -14,6 +14,7 @@ class Verdict(str, Enum):
     SAFE = "SAFE"
     SUSPICIOUS = "SUSPICIOUS"
     MALICIOUS = "MALICIOUS"
+    INCONCLUSIVE = "INCONCLUSIVE"
 
 
 class Severity(str, Enum):
