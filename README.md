@@ -210,54 +210,59 @@ ContextShield/
 
 ### Prerequisites
 
-- Python 3.12
-- Node.js (for clasp)
-- [Groq API key](https://console.groq.com) (free)
-- [ngrok](https://ngrok.com) (free) — to expose the local backend to Gmail
+| Tool | Version | Notes |
+|---|---|---|
+| Python | 3.12 | Backend runtime |
+| Node.js | any LTS | Required for `clasp` CLI |
+| [Groq API key](https://console.groq.com) | — | Free tier, no credit card |
+| [ngrok](https://ngrok.com) | — | Exposes local backend to Gmail |
 
-### 1. Start the backend
+---
+
+### Step 1 — Start the backend
 
 ```bash
 cd backend
 python -m venv .venv
 
-# macOS/Linux
-source .venv/bin/activate
-
 # Windows
 .venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
 
 pip install -r requirements.txt
 ```
 
-Create a `.env` file in the `backend/` directory:
+Create `backend/.env`:
 
-```
+```env
 GROQ_API_KEY=your-groq-api-key
 GOOGLE_SAFE_BROWSING_KEY=your-safe-browsing-key   # optional
 SERVICE_URL=                                        # leave empty for local dev
 ALLOWED_SA_EMAILS=                                  # leave empty for local dev
 ```
 
-Start the server:
-
 ```bash
 uvicorn main:app --reload --port 8080
 ```
 
-Health check: `curl http://localhost:8080/health` → `{"status":"ok"}`
+Verify: `curl http://localhost:8080/health` → `{"status":"ok"}`
 
-### 2. Expose via ngrok
+---
 
-In a second terminal:
+### Step 2 — Expose via ngrok
+
+Open a **second terminal**:
 
 ```bash
 ngrok http 8080
 ```
 
-Copy the `https://xxxx.ngrok-free.app` URL — you'll need it in the next step.
+Copy the `https://xxxx.ngrok-free.app` URL — needed in the next step.
 
-### 3. Deploy the add-on
+---
+
+### Step 3 — Deploy the Gmail Add-on
 
 ```bash
 npm install -g @google/clasp
@@ -268,13 +273,17 @@ clasp push
 clasp deploy --description "v1"
 ```
 
-Update the ngrok URL in `addon/Api.gs` (the fallback URL constant), then push again.
+> Update the ngrok URL constant in `addon/Api.gs`, then run `clasp push` again.
 
-### 4. Install in Gmail
+---
 
-1. Go to [script.google.com](https://script.google.com), open the ContextShield project
+### Step 4 — Install in Gmail
+
+1. Go to [script.google.com](https://script.google.com) → open **ContextShield**
 2. Click **Deploy → Test deployments → Install**
-3. Open Gmail — the ContextShield panel appears automatically when you open any email
+3. Open any email in Gmail — the ContextShield panel appears automatically
+
+---
 
 ### Running Tests
 
@@ -285,16 +294,16 @@ backend/.venv/Scripts/python -m pytest tests/ -v
 
 **108 tests, all passing in under 1 second.**
 
-```
-tests/unit/test_sanitizer.py        12 tests
-tests/unit/test_models.py           15 tests
-tests/unit/test_heuristics.py       24 tests
-tests/unit/test_groq_client.py      16 tests
-tests/unit/test_safebrowsing.py      6 tests
-tests/integration/test_analyze      11 tests
-tests/integration/test_chat          5 tests
-tests/integration/test_feedback      5 tests
-```
+| Test file | Tests |
+|---|---|
+| `tests/unit/test_sanitizer.py` | 12 |
+| `tests/unit/test_models.py` | 15 |
+| `tests/unit/test_heuristics.py` | 24 |
+| `tests/unit/test_groq_client.py` | 16 |
+| `tests/unit/test_safebrowsing.py` | 6 |
+| `tests/integration/test_analyze_endpoint.py` | 11 |
+| `tests/integration/test_chat_endpoint.py` | 5 |
+| `tests/integration/test_feedback_endpoint.py` | 5 |
 
 CI runs automatically on every push via GitHub Actions (tests + ruff lint).
 
