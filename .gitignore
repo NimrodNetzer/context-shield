@@ -25,3 +25,6 @@ Thumbs.db
 
 # Clasp (Apps Script CLI)
 .clasp.json
+
+# Runtime data
+feedback_log.jsonl
