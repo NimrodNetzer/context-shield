@@ -28,41 +28,18 @@ Security decisions are made by deterministic, auditable code. The LLM synthesize
 ## Architecture
 
 ```mermaid
-flowchart TD
-    GMAIL["📧 Gmail\nUser opens email"]
+flowchart LR
+    GM["Gmail"] --> AD["Add-on\nApps Script"]
 
-    subgraph Addon["Gmail Add-on — Apps Script"]
-        direction LR
-        EXTRACT["Extract\ntext + metadata"]
-        TOKEN["Attach\nOIDC token"]
-        EXTRACT --> TOKEN
+    AD -- "POST /analyze\nOIDC token" --> GW
+
+    subgraph BE["Backend — FastAPI"]
+        GW["Auth · Rate limit\nSanitize"] --> HE["Heuristics\n13 checks → score_floor"]
+        HE --> LM["Groq LLM\nscore ≥ floor"]
+        LM --> VA["Pydantic\nvalidation"]
     end
 
-    subgraph API["Backend — FastAPI"]
-        direction TB
-        G1["🔒 Gate 1\nOIDC verification"]
-        G2["🔒 Gate 2\nRate limiting · 30 req/min"]
-        G3["🔒 Gate 3\nSanitize · strip · truncate"]
-        H["⚙️ Heuristics Engine\n13 deterministic checks → score_floor"]
-        L["🤖 Groq LLM\nprompt-injection defended · score ≥ floor"]
-        G4["🔒 Gate 4\nPydantic output validation"]
-        G1 --> G2 --> G3 --> H --> L --> G4
-    end
-
-    subgraph Card["Gmail Add-on — Card UI"]
-        direction LR
-        VERDICT["Verdict + Score bar"]
-        CHIPS["Signal chips\n(tap → MITRE detail)"]
-        CHAT["Security Assistant"]
-        HISTORY["Analysis History"]
-    end
-
-    GMAIL --> EXTRACT
-    TOKEN -- "POST /analyze\nHTTPS" --> G1
-    G4 -- "JSON response" --> VERDICT
-    VERDICT --- CHIPS
-    VERDICT --- CHAT
-    VERDICT --- HISTORY
+    VA -- "verdict · score\nsignals · reasoning" --> UI["Card UI\nGmail sidebar"]
 ```
 
 ---
