@@ -27,37 +27,29 @@ Security decisions are made by deterministic, auditable code. The LLM synthesize
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         Backend (FastAPI)                               │
-│                                                                         │
-│  ┌───────────────────────┐    ┌──────────────────────────────────────┐  │
-│  │     HTTP Adapter      │    │       Detection Engine (Python)      │  │
-│  │                       │    │                                      │  │
-│  │  • OIDC token verify  │    │  ┌────────────────────────────────┐  │  │
-│  │  • Rate limiting      │───▶│  │   Deterministic Analyzers      │  │  │
-│  │  • Input sanitization │    │  │   auth · sender · URL · body   │──┼──┼──▶ Score
-│  │  • Schema validation  │    │  └────────────────────────────────┘  │  │    floor
-│  └───────────────────────┘    │                                      │  │     │
-│                               │  ┌────────────────────────────────┐  │  │     ▼
-│                               │  │   Semantic Analyzer (Groq LLM) │  │  │  ┌──────────┐
-│                               │  │   language · social engineering│──┼──┼─▶│ Verdict  │
-│                               │  └────────────────────────────────┘  │  │  │ Score    │
-│                               └──────────────────────────────────────┘  │  │ Reasoning│
-└─────────────────────────────────────────────────────────────────────────┘  └────┬─────┘
-                                                                                  │
-                              POST /analyze  (HTTPS + OIDC)                  JSON response
-                                                                                  │
-┌─────────────────────────────────────────────────────────────────────────────────┼──────┐
-│                          Gmail Add-on (Apps Script)                             │      │
-│                                                                                 │      │
-│   Extract email data ──▶ POST /analyze ─────────────────────────────────────── ┘      │
-│   (text + metadata,                                               Render Card UI       │
-│    no attachment content,                                         • Score bar          │
-│    OIDC signed)                                                   • Signal chips        │
-│                                                                   • Assistant chat     │
-│                                                                   • History panel      │
-└──────────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph Client["Gmail Add-on (Apps Script)"]
+        EX[Extract email data]
+        UI[Render verdict card]
+    end
+
+    subgraph Backend["Backend (FastAPI)"]
+        direction TB
+        HTTP["HTTP adapter<br/>OIDC · rate limit · schemas"]
+        subgraph Engine["Detection engine (pure Python)"]
+            direction TB
+            DET["Deterministic analyzers<br/>auth · sender · URL · body · attachment"]
+            SEM["Semantic analyzer<br/>language assessment<br/>Groq LLM"]
+            SCORE["Scoring + verdict<br/>score_floor · signals · reasoning"]
+            DET --> SCORE
+            SEM --> SCORE
+        end
+        HTTP --> Engine
+    end
+
+    EX -- "POST /analyze (OIDC)" --> HTTP
+    SCORE -- "JSON response" --> UI
 ```
 
 ---
