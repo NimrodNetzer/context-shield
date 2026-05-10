@@ -28,28 +28,41 @@ Security decisions are made by deterministic, auditable code. The LLM synthesize
 ## Architecture
 
 ```mermaid
-flowchart LR
-    subgraph Client["Gmail Add-on (Apps Script)"]
-        EX[Extract email data]
-        UI[Render verdict card]
+flowchart TD
+    GMAIL["📧 Gmail\nUser opens email"]
+
+    subgraph Addon["Gmail Add-on — Apps Script"]
+        direction LR
+        EXTRACT["Extract\ntext + metadata"]
+        TOKEN["Attach\nOIDC token"]
+        EXTRACT --> TOKEN
     end
 
-    subgraph Backend["Backend (FastAPI)"]
+    subgraph API["Backend — FastAPI"]
         direction TB
-        HTTP["HTTP adapter<br/>OIDC · rate limit · schemas"]
-        subgraph Engine["Detection engine (pure Python)"]
-            direction TB
-            DET["Deterministic analyzers<br/>auth · sender · URL · body · attachment"]
-            SEM["Semantic analyzer<br/>language assessment<br/>Groq LLM"]
-            SCORE["Scoring + verdict<br/>score_floor · signals · reasoning"]
-            DET --> SCORE
-            SEM --> SCORE
-        end
-        HTTP --> Engine
+        G1["🔒 Gate 1\nOIDC verification"]
+        G2["🔒 Gate 2\nRate limiting · 30 req/min"]
+        G3["🔒 Gate 3\nSanitize · strip · truncate"]
+        H["⚙️ Heuristics Engine\n13 deterministic checks → score_floor"]
+        L["🤖 Groq LLM\nprompt-injection defended · score ≥ floor"]
+        G4["🔒 Gate 4\nPydantic output validation"]
+        G1 --> G2 --> G3 --> H --> L --> G4
     end
 
-    EX -- "POST /analyze (OIDC)" --> HTTP
-    SCORE -- "JSON response" --> UI
+    subgraph Card["Gmail Add-on — Card UI"]
+        direction LR
+        VERDICT["Verdict + Score bar"]
+        CHIPS["Signal chips\n(tap → MITRE detail)"]
+        CHAT["Security Assistant"]
+        HISTORY["Analysis History"]
+    end
+
+    GMAIL --> EXTRACT
+    TOKEN -- "POST /analyze\nHTTPS" --> G1
+    G4 -- "JSON response" --> VERDICT
+    VERDICT --- CHIPS
+    VERDICT --- CHAT
+    VERDICT --- HISTORY
 ```
 
 ---
