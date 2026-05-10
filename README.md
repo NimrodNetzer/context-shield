@@ -28,43 +28,36 @@ Security decisions are made by deterministic, auditable code. The LLM synthesize
 ## Architecture
 
 ```
-Gmail (user opens email)
-        │
-        ▼
- Google Apps Script Add-on
-   • Extracts plain text + metadata only
-   • Attachment content never leaves the client
-   • Body truncated client-side before transmission
-   • Signed with Google OIDC identity token
-        │
-        ▼  HTTPS + OIDC
-        │
- FastAPI Backend (Python)
-   ┌─────────────────────────────────────────────┐
-   │  Gate 1 — OIDC token verification           │
-   │           audience exact-match to service   │
-   │  Gate 2 — Per-identity rate limiting        │
-   │  Gate 3 — Input sanitization               │
-   │           HTML strip, Unicode normalization │
-   │           hard truncation                   │
-   │                                             │
-   │  Stage 1 — Heuristic engine  ← security     │
-   │            13 deterministic signal checks   │
-   │            produces score_floor             │
-   │                                             │
-   │  Stage 2 — Groq LLM          ← explainability│
-   │            prompt injection defended        │
-   │            score clamped to floor           │
-   │                                             │
-   │  Gate 4 — Pydantic output validation        │
-   └─────────────────────────────────────────────┘
-        │
-        ▼
- Gmail Add-on Card UI
-   • Score bar, verdict, reasoning
-   • Signal chips (tap to expand)
-   • Security Assistant (persistent chat)
-   • Analysis History
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Backend (FastAPI)                               │
+│                                                                         │
+│  ┌───────────────────────┐    ┌──────────────────────────────────────┐  │
+│  │     HTTP Adapter      │    │       Detection Engine (Python)      │  │
+│  │                       │    │                                      │  │
+│  │  • OIDC token verify  │    │  ┌────────────────────────────────┐  │  │
+│  │  • Rate limiting      │───▶│  │   Deterministic Analyzers      │  │  │
+│  │  • Input sanitization │    │  │   auth · sender · URL · body   │──┼──┼──▶ Score
+│  │  • Schema validation  │    │  └────────────────────────────────┘  │  │    floor
+│  └───────────────────────┘    │                                      │  │     │
+│                               │  ┌────────────────────────────────┐  │  │     ▼
+│                               │  │   Semantic Analyzer (Groq LLM) │  │  │  ┌──────────┐
+│                               │  │   language · social engineering│──┼──┼─▶│ Verdict  │
+│                               │  └────────────────────────────────┘  │  │  │ Score    │
+│                               └──────────────────────────────────────┘  │  │ Reasoning│
+└─────────────────────────────────────────────────────────────────────────┘  └────┬─────┘
+                                                                                  │
+                              POST /analyze  (HTTPS + OIDC)                  JSON response
+                                                                                  │
+┌─────────────────────────────────────────────────────────────────────────────────┼──────┐
+│                          Gmail Add-on (Apps Script)                             │      │
+│                                                                                 │      │
+│   Extract email data ──▶ POST /analyze ─────────────────────────────────────── ┘      │
+│   (text + metadata,                                               Render Card UI       │
+│    no attachment content,                                         • Score bar          │
+│    OIDC signed)                                                   • Signal chips        │
+│                                                                   • Assistant chat     │
+│                                                                   • History panel      │
+└──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
