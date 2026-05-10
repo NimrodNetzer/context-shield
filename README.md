@@ -359,16 +359,26 @@ Liveness probe. No authentication required.
 
 **Trade-offs made:**
 
-- **Groq (Llama 3.3-70b) over GPT-4** — sub-500ms inference makes the add-on feel instant. The heuristic layer compensates for the accuracy gap on subtle attacks.
-- **ngrok over Cloud Run** — no billing account required for demo. Cloud Run config is ready (`cloudbuild.yaml`) — one command away from production.
-- **In-process rate limiter** — simple and dependency-free. Would swap for Redis (`slowapi`) for multi-instance Cloud Run.
-- **Filename-only attachment analysis** — attachment content never leaves the client (privacy boundary). A production version would send SHA-256 hashes to VirusTotal.
-- **Apps Script UI constraints** — Card Service is visually limited (no custom CSS, no hover effects, no Enter-key submission). The trade-off for native Gmail integration with no publishing overhead.
+- **Groq (Llama 3.3-70b) over GPT-4** — sub-500ms inference makes the add-on feel instant. The heuristic layer compensates for the accuracy gap on subtle attacks. GPT-4 would add ~2s latency with marginal security gain, since the LLM is the explainability layer, not the decision layer.
+
+- **Heuristics as the security engine, LLM as the explainability layer** — a deliberate inversion of the common pattern. The LLM cannot downgrade a verdict because `score_floor` is enforced in code. This means a prompt-injected email body can manipulate the explanation but never the score — the security guarantee is deterministic, not probabilistic.
+
+- **OIDC over HMAC** — Google-signed OIDC tokens are verified against Google's public key set, so there is no shared secret to manage or rotate. The trade-off is that verification requires a network call to fetch Google's JWKS; HMAC would work fully offline.
+
+- **In-process rate limiter** — simple and dependency-free. The trade-off is that it resets on restart and undercounts across multiple Cloud Run instances. A Redis-backed limiter (`slowapi`) would be correct for production but adds infrastructure cost and latency.
+
+- **Stateless backend, history stored client-side** — analysis results are never written to a database. History lives in Apps Script `UserProperties` (per-user, client-side). This eliminates a data retention risk entirely — there is nothing to breach — but means history is lost if the user clears app data.
+
+- **Filename-only attachment analysis** — attachment content never leaves the client (privacy boundary). The trade-off is that a malicious payload renamed to `invoice.pdf` bypasses detection. A production version would send SHA-256 hashes to VirusTotal without transmitting content.
+
+- **Apps Script UI constraints** — Card Service has no custom CSS, no hover effects, no Enter-key submission. The trade-off is zero publishing overhead and native Gmail integration — no OAuth app review, no browser extension store, no installation friction.
+
+- **`INCONCLUSIVE` over forced `SAFE`** — when no signals fire and the LLM scores 0, the verdict is `INCONCLUSIVE` rather than `SAFE`. A score of 0 means absence of evidence, not evidence of absence — the email may simply lack the metadata needed to make a determination.
 
 **With more time:**
 
 - Domain age lookup (WHOIS) — newly registered domains are a top phishing indicator
-- VirusTotal integration for attachment hash and URL scanning
-- Redis-backed rate limiter for multi-instance deployments
-- Sender reputation memory — flag anomalies from known-safe senders
+- VirusTotal integration for attachment hash scanning without transmitting content
+- Redis-backed rate limiter for correctness across multi-instance Cloud Run
+- Sender reputation memory — flag anomalies from senders the user previously marked safe
 - Structured JSON logging with Cloud Logging alerts on MALICIOUS verdicts
